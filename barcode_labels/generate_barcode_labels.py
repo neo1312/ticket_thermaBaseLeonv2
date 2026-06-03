@@ -11,7 +11,7 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch, mm
 from reportlab.lib.pagesizes import letter, landscape
 
-LABEL_W = 0.75 * inch + 0.5 * mm
+LABEL_W = 0.75 * inch + 1 * mm
 LABEL_H = 0.5 * inch + 0.5 * mm
 COLS = 14
 ROWS = 16
