@@ -9,15 +9,15 @@ from tkinter import ttk, messagebox, filedialog
 from reportlab.graphics.barcode import code128
 from reportlab.pdfgen import canvas
 from reportlab.lib.units import inch, mm
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 
-LABEL_W = 0.5 * inch
-LABEL_H = 0.75 * inch
-COLS = 16
-ROWS = 14
+LABEL_W = 0.75 * inch + 0.5 * mm
+LABEL_H = 0.5 * inch + 0.5 * mm
+COLS = 14
+ROWS = 16
 LABELS_PER_SHEET = COLS * ROWS
 
-PAGE_W, PAGE_H = letter
+PAGE_W, PAGE_H = landscape(letter)
 MARGIN_L = (PAGE_W - COLS * LABEL_W) / 2
 MARGIN_T = (PAGE_H - ROWS * LABEL_H) / 2
 
@@ -34,6 +34,9 @@ def get_barcode_drawing(data):
 
 
 def draw_barcode(c, bc, x, y):
+    c.setStrokeColorRGB(0.8, 0.8, 0.8)
+    c.setLineWidth(0.2)
+    c.rect(x, y, LABEL_W, LABEL_H)
     w = bc.width
     h = bc.height
     scale = min(BARCODE_MAX_W / w if w > 0 else 1, 1.0)
@@ -51,7 +54,7 @@ def draw_barcode(c, bc, x, y):
 
 
 def create_pdf(number, sheets, output_path):
-    c = canvas.Canvas(output_path, pagesize=letter)
+    c = canvas.Canvas(output_path, pagesize=landscape(letter))
     for sheet in range(sheets):
         bc = get_barcode_drawing(number)
         for row in range(ROWS):
@@ -76,7 +79,7 @@ class BarcodeLabelApp:
 
         ttk.Label(main, text="Código de Barras S-16986",
                   font=("Arial", 14, "bold")).pack(pady=(0, 4))
-        ttk.Label(main, text="Uline 1/2\" x 3/4\" · 224 etiquetas/hoja",
+        ttk.Label(main, text="Uline 3/4\" x 1/2\" · 224 etiquetas/hoja",
                   font=("Arial", 9), foreground="gray").pack(pady=(0, 12))
 
         entry_frame = ttk.Frame(main)
