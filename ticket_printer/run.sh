@@ -22,6 +22,11 @@ VENV="$DIR/venv"
         "$VENV/bin/pip" install -r requirements.txt --quiet 2>&1
     fi
 
-    echo "Launching main.py..."
-    "$VENV/bin/python3" main.py
+    MODE="${1:-gui}"
+    echo "Launching main.py (mode=$MODE)..."
+    if [ "$MODE" = "web" ]; then
+        "$VENV/bin/python3" main.py --web
+    else
+        "$VENV/bin/python3" main.py
+    fi
 } >> "$LOG" 2>&1

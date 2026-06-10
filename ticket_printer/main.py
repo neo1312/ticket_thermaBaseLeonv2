@@ -8,7 +8,10 @@ import re
 import unicodedata
 import subprocess
 import tempfile
+import sys
+import threading
 from datetime import datetime
+from flask import Flask, request, jsonify
 
 
 def clean_text(text):
@@ -41,6 +44,65 @@ def load_config():
 def save_config(config):
     with open(CONFIG_FILE, 'w') as f:
         json.dump(config, f, indent=2)
+
+
+def fetch_sale_data(server_url, sale_id):
+    url = f"{server_url.rstrip('/')}/sale/sale_ticket_json/{sale_id}"
+    resp = requests.get(url, timeout=10, verify=False)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def format_ticket(sale_data, store_name):
+    s = sale_data
+    store = clean_text(store_name)
+    w = 32
+    lines = []
+    lines.append("")
+    lines.append(store.center(w))
+    lines.append("")
+    lines.append("-" * w)
+    lines.append(f"Venta: #{s['sale_id']}")
+    try:
+        dt = datetime.fromisoformat(s['date'].replace('Z', '+00:00'))
+        date_str = dt.strftime("%d/%m/%Y %H:%M")
+    except (ValueError, AttributeError):
+        date_str = str(s.get('date', ''))
+    lines.append(f"Fecha: {date_str}")
+    lines.append(f"Cliente: {s['client']}")
+    lines.append("-" * w)
+    lines.append(f"{'Producto':13s} {'Cant':4s}{'Precio':7s}{'Total':6s}")
+    lines.append("-" * w)
+    for item in s['items']:
+        name = title_case(item['name'])[:13].ljust(13)
+        qty = f"{item['quantity']:.0f}".rjust(4)
+        price = f"${item['price']:.0f}".rjust(7)
+        total = f"${item['item_total']:.0f}".rjust(6)
+        lines.append(f"{name} {qty}{price}{total}")
+    lines.append("-" * w)
+    total_str = f"${s['total']:.0f}"
+    lines.append(f"{'TOTAL:':20s}  {total_str:>6s}")
+    lines.append("")
+    lines.append("Gracias por su compra!".center(w))
+    lines.append("")
+    return "\n".join(lines)
+
+
+def print_ticket_text(text, printer_name):
+    with tempfile.NamedTemporaryFile(mode='wb', suffix='.bin', delete=False) as f:
+        f.write(text.encode('cp437', errors='replace'))
+        f.write(b'\n\n\n')
+        f.write(b'\x1d\x56\x00')
+        temp_path = f.name
+    result = subprocess.run(
+        ['lp', '-d', printer_name, '-o', 'raw', temp_path],
+        capture_output=True, text=True, timeout=30
+    )
+    import os
+    os.unlink(temp_path)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip())
+    return True
 
 
 class TicketPrinterApp:
@@ -121,20 +183,16 @@ class TicketPrinterApp:
             messagebox.showwarning("Invalid ID", "Sale ID must be a number")
             return
 
-        server_url = self.server_url_var.get().strip().rstrip('/')
-        url = f"{server_url}/sale/sale_ticket_json/{sale_id}"
-
+        server_url = self.server_url_var.get().strip()
         try:
             self.fetch_btn.config(text="Fetching...", state=tk.DISABLED)
             self.root.update()
-            resp = requests.get(url, timeout=10, verify=False)
-            resp.raise_for_status()
-            self.sale_data = resp.json()
+            self.sale_data = fetch_sale_data(server_url, sale_id)
             self.build_ticket_text()
             self.print_btn.config(state=tk.NORMAL)
             self.fetch_btn.config(text="Fetch & Preview", state=tk.NORMAL)
         except requests.ConnectionError:
-            messagebox.showerror("Connection Error", f"Cannot reach server:\n{url}")
+            messagebox.showerror("Connection Error", f"Cannot reach server:\n{server_url}")
             self.fetch_btn.config(text="Fetch & Preview", state=tk.NORMAL)
         except requests.HTTPError as e:
             messagebox.showerror("HTTP Error", str(e))
@@ -146,109 +204,21 @@ class TicketPrinterApp:
     def build_ticket_text(self):
         if not self.sale_data:
             return
-        s = self.sale_data
-        store = clean_text(self.store_name_var.get().strip() or DEFAULT_CONFIG["store_name"])
-        w = self.W
-        lines = []
-        lines.append("")
-        lines.append(store.center(w))
-        lines.append("")
-        lines.append("-" * w)
-        lines.append(f"Venta: #{s['sale_id']}")
-        try:
-            dt = datetime.fromisoformat(s['date'].replace('Z', '+00:00'))
-            date_str = dt.strftime("%d/%m/%Y %H:%M")
-        except (ValueError, AttributeError):
-            date_str = str(s.get('date', ''))
-        lines.append(f"Fecha: {date_str}")
-        lines.append(f"Cliente: {s['client']}")
-        lines.append("-" * w)
-        lines.append(f"{'Producto':13s} {'Cant':4s}{'Precio':7s}{'Total':6s}")
-        lines.append("-" * w)
-
-        for item in s['items']:
-            name = title_case(item['name'])[:13].ljust(13)
-            qty = f"{item['quantity']:.0f}".rjust(4)
-            price = f"${item['price']:.0f}".rjust(7)
-            total = f"${item['item_total']:.0f}".rjust(6)
-            lines.append(f"{name} {qty}{price}{total}")
-
-        lines.append("-" * w)
-        total_str = f"${s['total']:.0f}"
-        lines.append(f"{'TOTAL:':20s}  {total_str:>6s}")
-        lines.append("")
-        lines.append("Gracias por su compra!".center(w))
-        lines.append("")
-
-        self.ticket_text = "\n".join(lines)
+        store = self.store_name_var.get().strip() or DEFAULT_CONFIG["store_name"]
+        self.ticket_text = format_ticket(self.sale_data, store)
         self.preview_text.delete(1.0, tk.END)
         self.preview_text.insert(1.0, self.ticket_text)
 
     def print_ticket(self):
         if not self.ticket_text:
             return
-
         try:
             self.print_btn.config(text="Printing...", state=tk.DISABLED)
             self.root.update()
-
-            store = clean_text(self.store_name_var.get().strip() or DEFAULT_CONFIG["store_name"])
-            w = self.W
-            s = self.sale_data
-
-            try:
-                dt = datetime.fromisoformat(s['date'].replace('Z', '+00:00'))
-                date_str = dt.strftime("%d/%m/%Y %H:%M")
-            except (ValueError, AttributeError):
-                date_str = str(s.get('date', ''))
-
-            lines = []
-            lines.append(store.center(w))
-            lines.append("")
-            lines.append("Venta #" + str(s['sale_id']))
-            lines.append("Fecha: " + date_str)
-            lines.append("Cliente: " + s['client'])
-            lines.append("-" * w)
-            lines.append("{:13s} {:4s}{:7s}{:6s}".format('Producto', 'Cant', 'Precio', 'Total'))
-            lines.append("-" * w)
-            for item in s['items']:
-                name = title_case(item['name'])[:13].ljust(13)
-                qty = f"{item['quantity']:.0f}".rjust(4)
-                price = f"${item['price']:.0f}".rjust(7)
-                total = f"${item['item_total']:.0f}".rjust(6)
-                lines.append(f"{name} {qty}{price}{total}")
-            lines.append("-" * w)
-            total_str = f"${s['total']:.0f}"
-            lines.append(f"{'TOTAL:':20s}  {total_str:>6s}")
-            lines.append("")
-            lines.append("Gracias por su compra!")
-            lines.append("")
-
-            text = "\n".join(lines)
-
             printer_name = self.config.get("cups_printer", DEFAULT_CONFIG["cups_printer"])
-
-            with tempfile.NamedTemporaryFile(mode='wb', suffix='.bin', delete=False) as f:
-                f.write(text.encode('cp437', errors='replace'))
-                f.write(b'\n\n\n')
-                f.write(b'\x1d\x56\x00')
-                temp_path = f.name
-
-            result = subprocess.run(
-                ['lp', '-d', printer_name, '-o', 'raw', temp_path],
-                capture_output=True, text=True, timeout=30
-            )
-
-            import os
-            os.unlink(temp_path)
-
-            if result.returncode == 0:
-                messagebox.showinfo("Success", "Ticket printed successfully!")
-            else:
-                raise RuntimeError(result.stderr.strip())
-
+            print_ticket_text(self.ticket_text, printer_name)
+            messagebox.showinfo("Success", "Ticket printed successfully!")
             self.print_btn.config(text="Print Ticket", state=tk.NORMAL)
-
         except Exception as e:
             messagebox.showerror("Print Error", f"Error printing ticket:\n{str(e)}")
             self.print_btn.config(text="Print Ticket", state=tk.NORMAL)
@@ -293,7 +263,142 @@ class TicketPrinterApp:
         ttk.Button(btn_row, text="Cancel", command=dialog.destroy).pack(side=tk.LEFT)
 
 
+# ---------------------------------------------------------------------------
+# Web server mode
+# ---------------------------------------------------------------------------
+web_app = Flask(__name__)
+web_app.config.from_mapping(load_config())
+
+WEB_HTML = """\
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>Ticket Printer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#1a1a2e;color:#eee;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;padding:16px;min-height:100dvh}
+.container{width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px}
+h1{font-size:1.25rem;text-align:center;color:#e94560;padding:10px 0}
+label{font-size:.9rem;color:#aaa}
+input[type=number]{width:100%;padding:14px;font-size:1.2rem;border:1px solid #333;border-radius:8px;background:#16213e;color:#eee;outline:none}
+input[type=number]:focus{border-color:#e94560}
+.btn{width:100%;padding:14px;font-size:1.1rem;border:none;border-radius:8px;cursor:pointer;color:#fff;font-weight:600}
+.btn-preview{background:#0f3460}
+.btn-print{background:#e94560}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+#preview{background:#16213e;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;line-height:1.3;white-space:pre;overflow-x:auto;min-height:60px;color:#eee;display:none}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;color:#fff;font-weight:600;z-index:999;display:none;max-width:90%}
+.toast.ok{background:#2ecc71}
+.toast.err{background:#e74c3c}
+.footer{text-align:center;font-size:.75rem;color:#555;padding:8px 0}
+</style>
+</head>
+<body>
+<div class=container>
+<h1>&#x1F5A8; Servicio de Impresion de Tickets</h1>
+<label for=sale_id>Sale ID</label>
+<input type=number id=sale_id placeholder="Ingrese ID de venta" inputmode=numeric>
+<button class="btn btn-preview" id=previewBtn onclick=doPreview()>&#x1F50D; Vista Previa</button>
+<div id=preview></div>
+<button class="btn btn-print" id=printBtn onclick=doPrint() disabled>&#x1F5B6; Imprimir</button>
+<div class=footer>Ferreteria Leon</div>
+</div>
+<div id=toast class=toast></div>
+<script>
+let currentId='';
+function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+type;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
+async function doPreview(){
+const id=document.getElementById('sale_id').value.trim();
+if(!id)return showToast('Ingrese un Sale ID','err');
+document.getElementById('previewBtn').disabled=true;
+document.getElementById('previewBtn').textContent='Cargando...';
+try{
+const r=await fetch('/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sale_id:id})});
+const d=await r.json();
+if(d.error){showToast(d.error,'err');document.getElementById('preview').style.display='none';return}
+document.getElementById('preview').textContent=d.ticket_text;
+document.getElementById('preview').style.display='block';
+currentId=id;
+document.getElementById('printBtn').disabled=false;
+showToast('Vista previa lista','ok')
+}catch(e){showToast('Error de conexion','err')}
+finally{document.getElementById('previewBtn').disabled=false;document.getElementById('previewBtn').innerHTML='&#x1F50D; Vista Previa'}
+}
+async function doPrint(){
+if(!currentId)return showToast('Primero haga vista previa','err');
+document.getElementById('printBtn').disabled=true;
+document.getElementById('printBtn').textContent='Imprimiendo...';
+try{
+const r=await fetch('/print',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sale_id:currentId})});
+const d=await r.json();
+if(d.success){showToast('Ticket impreso exitosamente','ok')}else{showToast(d.error||'Error al imprimir','err')}
+}catch(e){showToast('Error de conexion','err')}
+finally{document.getElementById('printBtn').disabled=false;document.getElementById('printBtn').innerHTML='&#x1F5B6; Imprimir'}
+}
+</script>
+</body>
+</html>
+"""
+
+
+@web_app.route('/')
+def index():
+    return WEB_HTML
+
+
+@web_app.route('/preview', methods=['POST'])
+def preview():
+    data = request.get_json(silent=True)
+    if not data or 'sale_id' not in data:
+        return jsonify(error="Sale ID requerido"), 400
+    sale_id = str(data['sale_id']).strip()
+    if not sale_id.isdigit():
+        return jsonify(error="Sale ID debe ser un numero"), 400
+    cfg = web_app.config
+    try:
+        sale_data = fetch_sale_data(cfg.get("server_url", DEFAULT_CONFIG["server_url"]), sale_id)
+        ticket_text = format_ticket(sale_data, cfg.get("store_name", DEFAULT_CONFIG["store_name"]))
+        return jsonify(ticket_text=ticket_text)
+    except requests.ConnectionError:
+        return jsonify(error="No se pudo conectar al servidor"), 502
+    except requests.HTTPError as e:
+        return jsonify(error=str(e)), 502
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
+@web_app.route('/print', methods=['POST'])
+def web_print():
+    data = request.get_json(silent=True)
+    if not data or 'sale_id' not in data:
+        return jsonify(error="Sale ID requerido"), 400
+    sale_id = str(data['sale_id']).strip()
+    if not sale_id.isdigit():
+        return jsonify(error="Sale ID debe ser un numero"), 400
+    cfg = web_app.config
+    try:
+        sale_data = fetch_sale_data(cfg.get("server_url", DEFAULT_CONFIG["server_url"]), sale_id)
+        ticket_text = format_ticket(sale_data, cfg.get("store_name", DEFAULT_CONFIG["store_name"]))
+        printer_name = cfg.get("cups_printer", DEFAULT_CONFIG["cups_printer"])
+        print_ticket_text(ticket_text, printer_name)
+        return jsonify(success=True, message="Ticket impreso exitosamente")
+    except requests.ConnectionError:
+        return jsonify(error="No se pudo conectar al servidor"), 502
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
+def start_web_server():
+    print("Web server starting on http://0.0.0.0:5000")
+    web_app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+
+
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = TicketPrinterApp(root)
-    root.mainloop()
+    if len(sys.argv) > 1 and sys.argv[1] == '--web':
+        start_web_server()
+    else:
+        root = tk.Tk()
+        app = TicketPrinterApp(root)
+        root.mainloop()
