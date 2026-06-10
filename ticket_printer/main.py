@@ -9,7 +9,7 @@ from datetime import datetime
 CONFIG_FILE = 'printer_config.json'
 
 DEFAULT_CONFIG = {
-    "server_url": "http://localhost:8000",
+    "server_url": "https://5.75.162.179",
     "cups_printer": "ferre",
     "store_name": "FERRETERÍA LEON",
 }
