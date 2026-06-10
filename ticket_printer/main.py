@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 import requests
 import json
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 import subprocess
 import tempfile
 from datetime import datetime
@@ -112,7 +114,7 @@ class TicketPrinterApp:
         try:
             self.fetch_btn.config(text="Fetching...", state=tk.DISABLED)
             self.root.update()
-            resp = requests.get(url, timeout=10)
+            resp = requests.get(url, timeout=10, verify=False)
             resp.raise_for_status()
             self.sale_data = resp.json()
             self.build_ticket_text()
