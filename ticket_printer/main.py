@@ -278,32 +278,42 @@ WEB_HTML = """\
 <title>Ticket Printer</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#1a1a2e;color:#eee;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;padding:16px;min-height:100dvh}
+body{background:#f0f0f0;color:#333;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;padding:16px;min-height:100dvh}
 .container{width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px}
-h1{font-size:1.25rem;text-align:center;color:#e94560;padding:10px 0}
-label{font-size:.9rem;color:#aaa}
-input[type=number]{width:100%;padding:14px;font-size:1.2rem;border:1px solid #333;border-radius:8px;background:#16213e;color:#eee;outline:none}
-input[type=number]:focus{border-color:#e94560}
-.btn{width:100%;padding:14px;font-size:1.1rem;border:none;border-radius:8px;cursor:pointer;color:#fff;font-weight:600}
-.btn-preview{background:#0f3460}
-.btn-print{background:#e94560}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-#preview{background:#16213e;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;line-height:1.3;white-space:pre;overflow-x:auto;min-height:60px;color:#eee;display:none}
-.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;color:#fff;font-weight:600;z-index:999;display:none;max-width:90%}
-.toast.ok{background:#2ecc71}
-.toast.err{background:#e74c3c}
-.footer{text-align:center;font-size:.75rem;color:#555;padding:8px 0}
+.header{background:#fff;border-radius:10px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.header h1{font-size:1.2rem;color:#444;font-weight:600}
+.header p{font-size:.8rem;color:#888;margin-top:4px}
+.card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.1);display:flex;flex-direction:column;gap:12px}
+label{font-size:.85rem;color:#666;font-weight:500}
+input[type=number]{width:100%;padding:14px;font-size:1.2rem;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#333;outline:none;transition:border-color .2s}
+input[type=number]:focus{border-color:#888;background:#fff}
+.btn{width:100%;padding:14px;font-size:1.1rem;border:none;border-radius:8px;cursor:pointer;color:#fff;font-weight:600;transition:opacity .2s}
+.btn-preview{background:#777}
+.btn-preview:hover{opacity:.9}
+.btn-print{background:#444}
+.btn-print:hover{opacity:.9}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+#preview{background:#fafafa;border:1px solid #ddd;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;line-height:1.3;white-space:pre;overflow-x:auto;min-height:60px;color:#333;display:none}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;color:#fff;font-weight:600;z-index:999;display:none;max-width:90%;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.toast.ok{background:#555}
+.toast.err{background:#999}
+.footer{text-align:center;font-size:.75rem;color:#aaa;padding:4px 0}
 </style>
 </head>
 <body>
 <div class=container>
-<h1>&#x1F5A8; Servicio de Impresion de Tickets</h1>
+<div class=header>
+<h1>Ticket Printer</h1>
+<p>Ferreteria Leon</p>
+</div>
+<div class=card>
 <label for=sale_id>Sale ID</label>
 <input type=number id=sale_id placeholder="Ingrese ID de venta" inputmode=numeric>
 <button class="btn btn-preview" id=previewBtn onclick=doPreview()>&#x1F50D; Vista Previa</button>
 <div id=preview></div>
 <button class="btn btn-print" id=printBtn onclick=doPrint() disabled>&#x1F5B6; Imprimir</button>
-<div class=footer>Ferreteria Leon</div>
+</div>
+<div class=footer>Ticket Printer v2</div>
 </div>
 <div id=toast class=toast></div>
 <script>
