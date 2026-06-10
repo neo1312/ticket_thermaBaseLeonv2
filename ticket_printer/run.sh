@@ -17,7 +17,7 @@ VENV="$DIR/venv"
     fi
 
     echo "Checking dependencies..."
-    if ! "$VENV/bin/python3" -c "import requests" 2>/dev/null; then
+    if ! "$VENV/bin/python3" -c "import requests, flask" 2>/dev/null; then
         echo "Installing requirements..."
         "$VENV/bin/pip" install -r requirements.txt --quiet 2>&1
     fi
