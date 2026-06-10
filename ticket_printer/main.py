@@ -4,16 +4,29 @@ import requests
 import json
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import re
+import unicodedata
 import subprocess
 import tempfile
 from datetime import datetime
+
+
+def clean_text(text):
+    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+    text = re.sub(r'[^a-zA-Z0-9\s\#\$\-\.\,]', '', text)
+    return text
+
+
+def title_case(text):
+    text = clean_text(text).lower()
+    return ' '.join(w.capitalize() for w in text.split())
 
 CONFIG_FILE = 'printer_config.json'
 
 DEFAULT_CONFIG = {
     "server_url": "https://5.75.162.179",
     "cups_printer": "ferre",
-    "store_name": "FERRETERÍA LEON",
+    "store_name": "Ferreteria Leon",
 }
 
 
@@ -134,7 +147,7 @@ class TicketPrinterApp:
         if not self.sale_data:
             return
         s = self.sale_data
-        store = self.store_name_var.get().strip() or DEFAULT_CONFIG["store_name"]
+        store = clean_text(self.store_name_var.get().strip() or DEFAULT_CONFIG["store_name"])
         w = self.W
         lines = []
         lines.append("")
@@ -150,19 +163,19 @@ class TicketPrinterApp:
         lines.append(f"Fecha: {date_str}")
         lines.append(f"Cliente: {s['client']}")
         lines.append("-" * w)
-        lines.append(f"{'Producto':15s} {'Cant':4s} {'Precio':7s} {'Total':6s}")
+        lines.append(f"{'Producto':18s}  {'Cant':4s}  {'Precio':8s}   {'Total':8s}")
         lines.append("-" * w)
 
         for item in s['items']:
-            name = item['name'][:15].ljust(15)
+            name = title_case(item['name'])[:18].ljust(18)
             qty = f"{item['quantity']:.0f}".rjust(4)
-            price = f"${item['price']:.2f}".rjust(7)
-            total = f"${item['item_total']:.2f}".rjust(6)
-            lines.append(f"{name}{qty}{price}{total}")
+            price = f"${item['price']:.0f}".rjust(8)
+            total = f"${item['item_total']:.0f}".rjust(8)
+            lines.append(f"{name}  {qty}  {price}   {total}")
 
         lines.append("-" * w)
-        total_str = f"${s['total']:.2f}"
-        lines.append(f"{'TOTAL:':24s} {total_str:>7s}")
+        total_str = f"${s['total']:.0f}"
+        lines.append(f"{'TOTAL:':28s} {total_str:>8s}")
         lines.append("")
         lines.append("Gracias por su compra!".center(w))
         lines.append("")
@@ -179,7 +192,7 @@ class TicketPrinterApp:
             self.print_btn.config(text="Printing...", state=tk.DISABLED)
             self.root.update()
 
-            store = self.store_name_var.get().strip() or DEFAULT_CONFIG["store_name"]
+            store = clean_text(self.store_name_var.get().strip() or DEFAULT_CONFIG["store_name"])
             w = self.W
             s = self.sale_data
 
@@ -196,17 +209,17 @@ class TicketPrinterApp:
             lines.append("Fecha: " + date_str)
             lines.append("Cliente: " + s['client'])
             lines.append("-" * w)
-            lines.append("{:15s} {:4s} {:7s} {:6s}".format('Producto', 'Cant', 'Precio', 'Total'))
+            lines.append("{:18s}  {:4s}  {:8s}   {:8s}".format('Producto', 'Cant', 'Precio', 'Total'))
             lines.append("-" * w)
             for item in s['items']:
-                name = item['name'][:15].ljust(15)
+                name = title_case(item['name'])[:18].ljust(18)
                 qty = f"{item['quantity']:.0f}".rjust(4)
-                price = f"${item['price']:.2f}".rjust(7)
-                total = f"${item['item_total']:.2f}".rjust(6)
-                lines.append(f"{name}{qty}{price}{total}")
+                price = f"${item['price']:.0f}".rjust(8)
+                total = f"${item['item_total']:.0f}".rjust(8)
+                lines.append(f"{name}  {qty}  {price}   {total}")
             lines.append("-" * w)
-            total_str = f"${s['total']:.2f}"
-            lines.append(f"{'TOTAL:':24s} {total_str:>7s}")
+            total_str = f"${s['total']:.0f}"
+            lines.append(f"{'TOTAL:':28s} {total_str:>8s}")
             lines.append("")
             lines.append("Gracias por su compra!")
             lines.append("")
