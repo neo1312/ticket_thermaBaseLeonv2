@@ -48,7 +48,7 @@ class TicketPrinterApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Ticket Printer")
-        self.root.geometry("500x650")
+        self.root.geometry("520x650")
         self.root.resizable(False, False)
 
         self.config = load_config()
@@ -79,7 +79,7 @@ class TicketPrinterApp:
 
         text_frame = ttk.Frame(preview_frame)
         text_frame.pack(fill=tk.BOTH, expand=True)
-        self.preview_text = tk.Text(text_frame, font=("Courier", 10), wrap=tk.NONE, height=18)
+        self.preview_text = tk.Text(text_frame, font=("Courier", 7), wrap=tk.NONE, height=20)
         self.preview_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scroll_y = ttk.Scrollbar(text_frame, orient=tk.VERTICAL, command=self.preview_text.yview)
@@ -163,19 +163,19 @@ class TicketPrinterApp:
         lines.append(f"Fecha: {date_str}")
         lines.append(f"Cliente: {s['client']}")
         lines.append("-" * w)
-        lines.append(f"{'Producto':18s}  {'Cant':4s}  {'Precio':8s}   {'Total':8s}")
+        lines.append(f"{'Producto':13s} {'Cant':4s}{'Precio':7s}{'Total':6s}")
         lines.append("-" * w)
 
         for item in s['items']:
-            name = title_case(item['name'])[:18].ljust(18)
+            name = title_case(item['name'])[:13].ljust(13)
             qty = f"{item['quantity']:.0f}".rjust(4)
-            price = f"${item['price']:.0f}".rjust(8)
-            total = f"${item['item_total']:.0f}".rjust(8)
-            lines.append(f"{name}  {qty}  {price}   {total}")
+            price = f"${item['price']:.0f}".rjust(7)
+            total = f"${item['item_total']:.0f}".rjust(6)
+            lines.append(f"{name} {qty}{price}{total}")
 
         lines.append("-" * w)
         total_str = f"${s['total']:.0f}"
-        lines.append(f"{'TOTAL:':28s} {total_str:>8s}")
+        lines.append(f"{'TOTAL:':20s}  {total_str:>6s}")
         lines.append("")
         lines.append("Gracias por su compra!".center(w))
         lines.append("")
@@ -209,17 +209,17 @@ class TicketPrinterApp:
             lines.append("Fecha: " + date_str)
             lines.append("Cliente: " + s['client'])
             lines.append("-" * w)
-            lines.append("{:18s}  {:4s}  {:8s}   {:8s}".format('Producto', 'Cant', 'Precio', 'Total'))
+            lines.append("{:13s} {:4s}{:7s}{:6s}".format('Producto', 'Cant', 'Precio', 'Total'))
             lines.append("-" * w)
             for item in s['items']:
-                name = title_case(item['name'])[:18].ljust(18)
+                name = title_case(item['name'])[:13].ljust(13)
                 qty = f"{item['quantity']:.0f}".rjust(4)
-                price = f"${item['price']:.0f}".rjust(8)
-                total = f"${item['item_total']:.0f}".rjust(8)
-                lines.append(f"{name}  {qty}  {price}   {total}")
+                price = f"${item['price']:.0f}".rjust(7)
+                total = f"${item['item_total']:.0f}".rjust(6)
+                lines.append(f"{name} {qty}{price}{total}")
             lines.append("-" * w)
             total_str = f"${s['total']:.0f}"
-            lines.append(f"{'TOTAL:':28s} {total_str:>8s}")
+            lines.append(f"{'TOTAL:':20s}  {total_str:>6s}")
             lines.append("")
             lines.append("Gracias por su compra!")
             lines.append("")
