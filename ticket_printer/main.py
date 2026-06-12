@@ -314,9 +314,6 @@ def get_barcode_drawing(data):
 
 
 def draw_barcode(c, bc, x, y):
-    c.setStrokeColorRGB(0, 0, 0)
-    c.setLineWidth(0.5)
-    c.rect(x, y, LABEL_W, LABEL_H)
     w = bc.width
     h = bc.height
     scale = min(BARCODE_MAX_W / w if w > 0 else 1, 1.0)
