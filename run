@@ -1,0 +1,2 @@
+#!/bin/sh
+exec ./venv/bin/python ticket_printer/main.py --web "$@"
