@@ -22,8 +22,11 @@ SHEET_H = 215 * mm
 LABEL_W = 19 * mm
 LABEL_H = (SHEET_H - MARGIN - MARGIN_B) / ROWS  # 12.8125mm
 
-MARGIN_L = (SHEET_W - COLS * LABEL_W) / 2  # ~6.5mm centered
-MARGIN_T = MARGIN
+OFFSET_X = 2 * mm   # shift right
+OFFSET_Y = -2 * mm  # shift down (negative in PDF coords)
+
+MARGIN_L = (SHEET_W - COLS * LABEL_W) / 2 + OFFSET_X  # ~8.5mm
+MARGIN_T = MARGIN + OFFSET_Y  # 4mm
 
 BARCODE_MAX_W = LABEL_W * 0.85
 
