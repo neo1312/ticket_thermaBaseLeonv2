@@ -54,15 +54,20 @@ def draw_barcode(c, bc, x, y):
         bc.drawOn(c, bx, by)
 
 
-def create_pdf(number, sheets, output_path):
+def create_pdf(number, sheets, output_path, blank=False):
     c = canvas.Canvas(output_path, pagesize=(SHEET_W, SHEET_H))
     for sheet in range(sheets):
-        bc = get_barcode_drawing(number)
+        bc = get_barcode_drawing(number) if not blank else None
         for row in range(ROWS):
             for col in range(COLS):
                 x = MARGIN_L + col * LABEL_W
                 y = MARGIN_T + (ROWS - 1 - row) * LABEL_H
-                draw_barcode(c, bc, x, y)
+                if blank:
+                    c.setStrokeColorRGB(0, 0, 0)
+                    c.setLineWidth(0.5)
+                    c.rect(x, y, LABEL_W, LABEL_H)
+                else:
+                    draw_barcode(c, bc, x, y)
         if sheet < sheets - 1:
             c.showPage()
     c.save()
@@ -89,6 +94,11 @@ class BarcodeLabelApp:
         self.number_var = tk.StringVar()
         ttk.Entry(entry_frame, textvariable=self.number_var, width=30).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(4, 0))
+
+        self.blank_var = tk.BooleanVar()
+        blank_cb = ttk.Checkbutton(main, text="Hoja en blanco (solo bordes, test)",
+                                   variable=self.blank_var)
+        blank_cb.pack(anchor=tk.W, pady=(2, 0))
 
         sheet_frame = ttk.Frame(main)
         sheet_frame.pack(fill=tk.X, pady=4)
@@ -126,13 +136,15 @@ class BarcodeLabelApp:
             self.output_path_var.set(path)
 
     def generate(self):
+        blank = self.blank_var.get()
         number = self.number_var.get().strip()
-        if not number:
-            messagebox.showwarning("Campo vacío", "Ingrese un número para el código de barras.")
-            return
-        if not number.isdigit():
-            messagebox.showwarning("Número inválido", "Solo se permiten dígitos.")
-            return
+        if not blank:
+            if not number:
+                messagebox.showwarning("Campo vacío", "Ingrese un número para el código de barras.")
+                return
+            if not number.isdigit():
+                messagebox.showwarning("Número inválido", "Solo se permiten dígitos.")
+                return
 
         sheets_str = self.sheets_var.get().strip()
         try:
@@ -153,12 +165,13 @@ class BarcodeLabelApp:
             output_path = base + ".pdf"
 
         try:
-            create_pdf(number, sheets, output_path)
+            label_text = "Blanco (test)" if blank else number
+            create_pdf(number, sheets, output_path, blank=blank)
             self.status_var.set(f"✓ PDF generado: {os.path.basename(output_path)}")
             messagebox.showinfo(
                 "Completado",
                 f"PDF generado exitosamente.\n\n"
-                f"Número: {number}\n"
+                f"{'Modo: Hoja en blanco' if blank else f'Número: {number}'}\n"
                 f"Hojas: {sheets}\n"
                 f"Etiquetas: {sheets * LABELS_PER_SHEET:,}\n"
                 f"Archivo: {output_path}")

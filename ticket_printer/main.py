@@ -330,16 +330,21 @@ def draw_barcode(c, bc, x, y):
         bc.drawOn(c, bx, by)
 
 
-def generate_barcode_pdf(number, sheets):
+def generate_barcode_pdf(number, sheets, blank=False):
     buf = BytesIO()
     c = canvas.Canvas(buf, pagesize=(SHEET_W, SHEET_H))
     for sheet in range(sheets):
-        bc = get_barcode_drawing(number)
+        bc = get_barcode_drawing(number) if not blank else None
         for row in range(ROWS):
             for col in range(COLS):
                 x = MARGIN_L + col * LABEL_W
                 y = MARGIN_T + (ROWS - 1 - row) * LABEL_H
-                draw_barcode(c, bc, x, y)
+                if blank:
+                    c.setStrokeColorRGB(0, 0, 0)
+                    c.setLineWidth(0.5)
+                    c.rect(x, y, LABEL_W, LABEL_H)
+                else:
+                    draw_barcode(c, bc, x, y)
         if sheet < sheets - 1:
             c.showPage()
     c.save()
@@ -475,6 +480,9 @@ input[type=number],input[type=text]{width:100%;padding:14px;font-size:1.2rem;bor
 input[type=number]:focus,input[type=text]:focus{border-color:#888;background:#fff}
 input.small{width:100px;font-size:1rem;padding:10px 14px}
 .hint{font-size:.75rem;color:#999;margin-top:2px}
+.toggle-row{display:flex;align-items:center;gap:10px;padding:4px 0}
+.toggle-row input[type=checkbox]{width:20px;height:20px;accent-color:#2a7a4a;cursor:pointer}
+.toggle-row label{cursor:pointer;user-select:none}
 .btn{width:100%;padding:14px;font-size:1.1rem;border:none;border-radius:8px;cursor:pointer;color:#fff;font-weight:600;transition:opacity .2s}
 .btn-barcode{background:#2a7a4a}
 .btn-barcode:hover{opacity:.9}
@@ -497,6 +505,10 @@ input.small{width:100px;font-size:1rem;padding:10px 14px}
 <div class=card>
 <label for=bc_number>Numero del codigo de barras</label>
 <input type=text id=bc_number placeholder="Ej: 123456" inputmode=numeric>
+<div class=toggle-row>
+<input type=checkbox id=bc_blank>
+<label for=bc_blank>Hoja en blanco (solo bordes, test)</label>
+</div>
 <label for=bc_sheets style=margin-top:4px>Cantidad de hojas</label>
 <div style=display:flex;align-items:center;gap:8px>
 <input type=number class=small id=bc_sheets value=1 min=1>
@@ -510,21 +522,26 @@ input.small{width:100px;font-size:1rem;padding:10px 14px}
 <script>
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+type;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function downloadBarcode(){
-const num=document.getElementById('bc_number').value.trim();
+const blank=document.getElementById('bc_blank').checked;
+let num='';
+if(!blank){
+num=document.getElementById('bc_number').value.trim();
 if(!num)return showToast('Ingrese un numero','err');
 if(!/^\d+$/.test(num))return showToast('Solo digitos permitidos','err');
+}
 const sheets=parseInt(document.getElementById('bc_sheets').value)||1;
 if(sheets<1)return showToast('Hojas debe ser >= 1','err');
 document.getElementById('barcodeBtn').disabled=true;
 document.getElementById('barcodeBtn').textContent='Generando...';
 try{
-const r=await fetch('/barcode/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number:num,sheets:sheets})});
+const r=await fetch('/barcode/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number:num,sheets:sheets,blank:blank})});
 if(!r.ok){const d=await r.json();showToast(d.error||'Error al generar','err');return}
 const blob=await r.blob();
 const url=URL.createObjectURL(blob);
 const a=document.createElement('a');
 a.href=url;
-a.download='codigo_'+num+'_s16986.pdf';
+const fname=blank?'test_blanco_s16986.pdf':'codigo_'+num+'_s16986.pdf';
+a.download=fname;
 document.body.appendChild(a);
 a.click();
 document.body.removeChild(a);
@@ -615,9 +632,10 @@ def barcode_generate():
         except (ValueError, TypeError):
             return jsonify(error="Hojas debe ser un número entero >= 1"), 400
 
+    blank = data.get('blank', False)
     try:
-        pdf_buf = generate_barcode_pdf(number, sheets)
-        filename = f"codigo_{number}_s16986.pdf"
+        pdf_buf = generate_barcode_pdf(number, sheets, blank=blank)
+        filename = f"codigo_{number}_s16986.pdf" if not blank else "test_blanco_s16986.pdf"
         return send_file(
             pdf_buf,
             mimetype='application/pdf',
