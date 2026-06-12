@@ -298,14 +298,8 @@ LABEL_H = 13 * mm
 
 SHEET_W = 279 * mm
 SHEET_H = 215 * mm
-MARGIN = 6 * mm
-
-grid_w = COLS * LABEL_W
-grid_h = ROWS * LABEL_H
-avail_w = SHEET_W - 2 * MARGIN
-avail_h = SHEET_H - 2 * MARGIN
-MARGIN_L = MARGIN + (avail_w - grid_w) / 2
-MARGIN_T = MARGIN + (avail_h - grid_h) / 2
+MARGIN_L = 6 * mm
+MARGIN_T = 6 * mm
 
 BARCODE_MAX_W = LABEL_W * 0.85
 
@@ -317,8 +311,8 @@ def get_barcode_drawing(data):
 
 
 def draw_barcode(c, bc, x, y):
-    c.setStrokeColorRGB(0.8, 0.8, 0.8)
-    c.setLineWidth(0.2)
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(0.5)
     c.rect(x, y, LABEL_W, LABEL_H)
     w = bc.width
     h = bc.height
