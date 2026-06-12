@@ -8,18 +8,25 @@ from tkinter import ttk, messagebox, filedialog
 
 from reportlab.graphics.barcode import code128
 from reportlab.pdfgen import canvas
-from reportlab.lib.units import inch, mm
-from reportlab.lib.pagesizes import letter, landscape
+from reportlab.lib.units import mm
 
-LABEL_W = 0.75 * inch + 1 * mm
-LABEL_H = 0.5 * inch + 0.5 * mm
 COLS = 14
 ROWS = 16
 LABELS_PER_SHEET = COLS * ROWS
 
-PAGE_W, PAGE_H = landscape(letter)
-MARGIN_L = (PAGE_W - COLS * LABEL_W) / 2
-MARGIN_T = (PAGE_H - ROWS * LABEL_H) / 2
+LABEL_W = 19 * mm
+LABEL_H = 13 * mm
+
+SHEET_W = 279 * mm
+SHEET_H = 215 * mm
+MARGIN = 6 * mm
+
+grid_w = COLS * LABEL_W
+grid_h = ROWS * LABEL_H
+avail_w = SHEET_W - 2 * MARGIN
+avail_h = SHEET_H - 2 * MARGIN
+MARGIN_L = MARGIN + (avail_w - grid_w) / 2
+MARGIN_T = MARGIN + (avail_h - grid_h) / 2
 
 BARCODE_MAX_W = LABEL_W * 0.85
 
@@ -29,7 +36,7 @@ DEFAULT_DIR = os.path.expanduser("~/Downloads/scripsbaseleonV2")
 def get_barcode_drawing(data):
     bc = code128.Code128(str(data), barHeight=10 * mm,
                          barWidth=0.15 * mm, quiet=False,
-                         humanReadable=True, fontSize=5)
+                         humanReadable=False)
     return bc
 
 
@@ -54,7 +61,7 @@ def draw_barcode(c, bc, x, y):
 
 
 def create_pdf(number, sheets, output_path):
-    c = canvas.Canvas(output_path, pagesize=landscape(letter))
+    c = canvas.Canvas(output_path, pagesize=(SHEET_W, SHEET_H))
     for sheet in range(sheets):
         bc = get_barcode_drawing(number)
         for row in range(ROWS):
