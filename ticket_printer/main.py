@@ -617,11 +617,15 @@ def web_print():
 @web_app.route('/barcode/generate', methods=['POST'])
 def barcode_generate():
     data = request.get_json(silent=True)
-    if not data or 'number' not in data:
-        return jsonify(error="Número requerido"), 400
-    number = str(data['number']).strip()
-    if not number.isdigit():
-        return jsonify(error="El número debe contener solo dígitos"), 400
+    if not data:
+        return jsonify(error="Solicitud inválida"), 400
+    blank = data.get('blank', False)
+    number = str(data.get('number', '')).strip()
+    if not blank:
+        if not number:
+            return jsonify(error="Número requerido"), 400
+        if not number.isdigit():
+            return jsonify(error="El número debe contener solo dígitos"), 400
 
     sheets = 1
     if 'sheets' in data:
@@ -632,7 +636,6 @@ def barcode_generate():
         except (ValueError, TypeError):
             return jsonify(error="Hojas debe ser un número entero >= 1"), 400
 
-    blank = data.get('blank', False)
     try:
         pdf_buf = generate_barcode_pdf(number, sheets, blank=blank)
         filename = f"codigo_{number}_s16986.pdf" if not blank else "test_blanco_s16986.pdf"
