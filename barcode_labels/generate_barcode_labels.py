@@ -13,14 +13,16 @@ from reportlab.lib.units import mm
 COLS = 14
 ROWS = 16
 LABELS_PER_SHEET = COLS * ROWS
-
-LABEL_W = 19 * mm
-LABEL_H = 13 * mm
+MARGIN = 6 * mm
 
 SHEET_W = 279 * mm
 SHEET_H = 215 * mm
-MARGIN_L = 6 * mm
-MARGIN_T = 6 * mm
+
+LABEL_W = 19 * mm
+LABEL_H = (SHEET_H - 2 * MARGIN) / ROWS  # ~12.6875mm → exactly 6mm top/bottom when centered
+
+MARGIN_L = (SHEET_W - COLS * LABEL_W) / 2  # ~6.5mm centered
+MARGIN_T = MARGIN  # exactly 6mm = (SHEET_H - ROWS * LABEL_H) / 2
 
 BARCODE_MAX_W = LABEL_W * 0.85
 
