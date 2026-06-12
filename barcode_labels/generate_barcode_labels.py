@@ -13,16 +13,17 @@ from reportlab.lib.units import mm
 COLS = 14
 ROWS = 16
 LABELS_PER_SHEET = COLS * ROWS
-MARGIN = 6 * mm
+MARGIN = 6 * mm          # top, left, right target margins
+MARGIN_B = 4 * mm        # bottom digital margin (printer adds +2mm → 6mm physical)
 
 SHEET_W = 279 * mm
 SHEET_H = 215 * mm
 
 LABEL_W = 19 * mm
-LABEL_H = (SHEET_H - 2 * MARGIN) / ROWS  # ~12.6875mm → exactly 6mm top/bottom when centered
+LABEL_H = (SHEET_H - MARGIN - MARGIN_B) / ROWS  # 12.8125mm
 
 MARGIN_L = (SHEET_W - COLS * LABEL_W) / 2  # ~6.5mm centered
-MARGIN_T = MARGIN  # exactly 6mm = (SHEET_H - ROWS * LABEL_H) / 2
+MARGIN_T = MARGIN
 
 BARCODE_MAX_W = LABEL_W * 0.85
 
