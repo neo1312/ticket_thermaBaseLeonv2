@@ -351,26 +351,23 @@ def generate_barcode_pdf(number, sheets):
 web_app = Flask(__name__)
 web_app.config.from_mapping(load_config())
 
-WEB_HTML = """\
+WEB_HTML_TICKET = """\
 <!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
-<title>Ferreteria Leon</title>
+<title>Ferreteria Leon - Ticket</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#f0f0f0;color:#333;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;padding:16px;min-height:100dvh}
 .container{width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px}
 .header{background:#fff;border-radius:10px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 .header h1{font-size:1.2rem;color:#444;font-weight:600}
-.header p{font-size:.8rem;color:#888;margin-top:4px}
-.tabs{display:flex;gap:6px}
-.tab{flex:1;padding:12px;text-align:center;background:#ddd;border:none;border-radius:8px;cursor:pointer;font-size:.95rem;font-weight:600;color:#666;transition:all .2s}
-.tab.active{background:#444;color:#fff}
-.tab:hover:not(.active){background:#ccc}
-.section{display:none;flex-direction:column;gap:12px}
-.section.active{display:flex}
+.nav{display:flex;justify-content:center;gap:20px;margin-top:8px}
+.nav a{text-decoration:none;font-size:.85rem;font-weight:500;color:#999;padding:4px 0;transition:color .2s}
+.nav a.active{color:#444;font-weight:700}
+.nav a:hover{color:#666}
 .card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.1);display:flex;flex-direction:column;gap:12px}
 label{font-size:.85rem;color:#666;font-weight:500}
 input[type=number],input[type=text]{width:100%;padding:14px;font-size:1.2rem;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#333;outline:none;transition:border-color .2s}
@@ -382,8 +379,6 @@ input.small{width:100px;font-size:1rem;padding:10px 14px}
 .btn-preview:hover{opacity:.9}
 .btn-print{background:#444}
 .btn-print:hover{opacity:.9}
-.btn-barcode{background:#2a7a4a}
-.btn-barcode:hover{opacity:.9}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 #preview{background:#fafafa;border:1px solid #ddd;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;line-height:1.3;white-space:pre;overflow-x:auto;min-height:60px;color:#333;display:none}
 .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;color:#fff;font-weight:600;z-index:999;display:none;max-width:90%;box-shadow:0 2px 8px rgba(0,0,0,.15)}
@@ -396,13 +391,12 @@ input.small{width:100px;font-size:1rem;padding:10px 14px}
 <div class=container>
 <div class=header>
 <h1>Ferreteria Leon</h1>
-<p>Herramientas y Ferreteria</p>
+<div class=nav>
+<a href=/ class=active>Ticket</a>
+<a href=/barcode>Codigos de Barras</a>
 </div>
-<div class=tabs>
-<button class="tab active" id=tabTicket onclick="switchTab('ticket')">Ticket</button>
-<button class=tab id=tabBarcode onclick="switchTab('barcode')">Codigos de Barras</button>
 </div>
-<div class="card section active" id=secTicket>
+<div class=card>
 <label for=ticket_type>Tipo</label>
 <select id=ticket_type style="width:100%;padding:14px;font-size:1.2rem;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#333;outline:none;appearance:auto">
 <option value=sale>Venta</option>
@@ -415,33 +409,12 @@ input.small{width:100px;font-size:1rem;padding:10px 14px}
 <div id=preview></div>
 <button class="btn btn-print" id=printBtn onclick=doPrint() disabled>&#x1F5B6; Imprimir</button>
 </div>
-<div class="card section" id=secBarcode>
-<label for=bc_number>Numero del codigo de barras</label>
-<input type=text id=bc_number placeholder="Ej: 123456" inputmode=numeric>
-<label for=bc_sheets style=margin-top:4px>Cantidad de hojas</label>
-<div style=display:flex;align-items:center;gap:8px>
-<input type=number class=small id=bc_sheets value=1 min=1>
-<span class=hint>224 etiquetas / hoja</span>
-</div>
-<button class="btn btn-barcode" id=barcodeBtn onclick=downloadBarcode()>&#x1F4E5; Generar PDF</button>
-</div>
 <div class=footer>v2</div>
 </div>
 <div id=toast class=toast></div>
 <script>
 let currentId='';
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+type;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
-function switchTab(tab){
-document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
-document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
-if(tab==='ticket'){
-document.getElementById('tabTicket').classList.add('active');
-document.getElementById('secTicket').classList.add('active');
-}else{
-document.getElementById('tabBarcode').classList.add('active');
-document.getElementById('secBarcode').classList.add('active');
-}
-}
 async function doPreview(){
 const id=document.getElementById('sale_id').value.trim();
 if(!id)return showToast('Ingrese un ID','err');
@@ -472,6 +445,68 @@ if(d.success){showToast('Ticket impreso exitosamente','ok')}else{showToast(d.err
 }catch(e){showToast('Error de conexion','err')}
 finally{document.getElementById('printBtn').disabled=false;document.getElementById('printBtn').innerHTML='&#x1F5B6; Imprimir'}
 }
+</script>
+</body>
+</html>
+"""
+
+WEB_HTML_BARCODE = """\
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>Ferreteria Leon - Codigos de Barras</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#f0f0f0;color:#333;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;padding:16px;min-height:100dvh}
+.container{width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px}
+.header{background:#fff;border-radius:10px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.header h1{font-size:1.2rem;color:#444;font-weight:600}
+.nav{display:flex;justify-content:center;gap:20px;margin-top:8px}
+.nav a{text-decoration:none;font-size:.85rem;font-weight:500;color:#999;padding:4px 0;transition:color .2s}
+.nav a.active{color:#444;font-weight:700}
+.nav a:hover{color:#666}
+.card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.1);display:flex;flex-direction:column;gap:12px}
+label{font-size:.85rem;color:#666;font-weight:500}
+input[type=number],input[type=text]{width:100%;padding:14px;font-size:1.2rem;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#333;outline:none;transition:border-color .2s}
+input[type=number]:focus,input[type=text]:focus{border-color:#888;background:#fff}
+input.small{width:100px;font-size:1rem;padding:10px 14px}
+.hint{font-size:.75rem;color:#999;margin-top:2px}
+.btn{width:100%;padding:14px;font-size:1.1rem;border:none;border-radius:8px;cursor:pointer;color:#fff;font-weight:600;transition:opacity .2s}
+.btn-barcode{background:#2a7a4a}
+.btn-barcode:hover{opacity:.9}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;color:#fff;font-weight:600;z-index:999;display:none;max-width:90%;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.toast.ok{background:#555}
+.toast.err{background:#999}
+.footer{text-align:center;font-size:.75rem;color:#aaa;padding:4px 0}
+</style>
+</head>
+<body>
+<div class=container>
+<div class=header>
+<h1>Ferreteria Leon</h1>
+<div class=nav>
+<a href=/>Ticket</a>
+<a href=/barcode class=active>Codigos de Barras</a>
+</div>
+</div>
+<div class=card>
+<label for=bc_number>Numero del codigo de barras</label>
+<input type=text id=bc_number placeholder="Ej: 123456" inputmode=numeric>
+<label for=bc_sheets style=margin-top:4px>Cantidad de hojas</label>
+<div style=display:flex;align-items:center;gap:8px>
+<input type=number class=small id=bc_sheets value=1 min=1>
+<span class=hint>224 etiquetas / hoja</span>
+</div>
+<button class="btn btn-barcode" id=barcodeBtn onclick=downloadBarcode()>&#x1F4E5; Generar PDF</button>
+</div>
+<div class=footer>v2</div>
+</div>
+<div id=toast class=toast></div>
+<script>
+function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+type;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
 async function downloadBarcode(){
 const num=document.getElementById('bc_number').value.trim();
 if(!num)return showToast('Ingrese un numero','err');
@@ -504,7 +539,12 @@ finally{document.getElementById('barcodeBtn').disabled=false;document.getElement
 
 @web_app.route('/')
 def index():
-    return WEB_HTML
+    return WEB_HTML_TICKET
+
+
+@web_app.route('/barcode')
+def barcode_page():
+    return WEB_HTML_BARCODE
 
 
 @web_app.route('/preview', methods=['POST'])
