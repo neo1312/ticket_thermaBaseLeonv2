@@ -11,7 +11,13 @@ import tempfile
 import sys
 import threading
 from datetime import datetime
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
+from io import BytesIO
+
+from reportlab.graphics.barcode import code128
+from reportlab.pdfgen import canvas
+from reportlab.lib.units import inch, mm
+from reportlab.lib.pagesizes import letter, landscape
 
 
 def clean_text(text):
@@ -32,6 +38,12 @@ DEFAULT_CONFIG = {
     "store_name": "Ferreteria Leon",
 }
 
+TICKET_TYPES = {
+    "sale": {"endpoint": "/sale/sale_ticket_json/", "label": "Venta"},
+    "quote": {"endpoint": "/quote/quote_ticket_json/", "label": "Cotizacion"},
+    "devolution": {"endpoint": "/devolution/devolution_ticket_json/", "label": "Devolucion"},
+}
+
 
 def load_config():
     try:
@@ -46,23 +58,25 @@ def save_config(config):
         json.dump(config, f, indent=2)
 
 
-def fetch_sale_data(server_url, sale_id):
-    url = f"{server_url.rstrip('/')}/sale/sale_ticket_json/{sale_id}"
+def fetch_ticket_data(server_url, doc_id, ticket_type="sale"):
+    ep = TICKET_TYPES.get(ticket_type, TICKET_TYPES["sale"])["endpoint"]
+    url = f"{server_url.rstrip('/')}{ep}{doc_id}"
     resp = requests.get(url, timeout=10, verify=False)
     resp.raise_for_status()
     return resp.json()
 
 
-def format_ticket(sale_data, store_name):
+def format_ticket(sale_data, store_name, ticket_type="sale"):
     s = sale_data
     store = clean_text(store_name)
+    label = TICKET_TYPES.get(ticket_type, TICKET_TYPES["sale"])["label"]
     w = 32
     lines = []
     lines.append("")
     lines.append(store.center(w))
     lines.append("")
     lines.append("-" * w)
-    lines.append(f"Venta: #{s['sale_id']}")
+    lines.append(f"{label}: #{s['sale_id']}")
     try:
         dt = datetime.fromisoformat(s['date'].replace('Z', '+00:00'))
         date_str = dt.strftime("%d/%m/%Y %H:%M")
@@ -121,16 +135,22 @@ class TicketPrinterApp:
         ttk.Label(main, text="Ticket Printer", font=("Arial", 16, "bold")).pack(pady=(0, 8))
         ttk.Separator(main, orient='horizontal').pack(fill=tk.X, pady=4)
 
-        fetch_frame = ttk.LabelFrame(main, text="Fetch Sale", padding=10)
+        fetch_frame = ttk.LabelFrame(main, text="Fetch Document", padding=10)
         fetch_frame.pack(fill=tk.X, pady=6)
 
-        ttk.Label(fetch_frame, text="Sale ID:").grid(row=0, column=0, sticky=tk.W)
-        self.sale_id_entry = ttk.Entry(fetch_frame, width=20)
-        self.sale_id_entry.grid(row=0, column=1, padx=(6, 0), sticky=tk.EW)
+        ttk.Label(fetch_frame, text="Type:").grid(row=0, column=0, sticky=tk.W)
+        self.ticket_type_var = tk.StringVar(value="sale")
+        type_combo = ttk.Combobox(fetch_frame, textvariable=self.ticket_type_var,
+                                  values=["sale", "quote", "devolution"], state="readonly", width=14)
+        type_combo.grid(row=0, column=1, padx=(6, 0), sticky=tk.W)
         fetch_frame.columnconfigure(1, weight=1)
 
+        ttk.Label(fetch_frame, text="ID:").grid(row=1, column=0, sticky=tk.W, pady=(4, 0))
+        self.sale_id_entry = ttk.Entry(fetch_frame, width=20)
+        self.sale_id_entry.grid(row=1, column=1, padx=(6, 0), pady=(4, 0), sticky=tk.EW)
+
         btn_frame = ttk.Frame(fetch_frame)
-        btn_frame.grid(row=1, column=0, columnspan=2, pady=(8, 0))
+        btn_frame.grid(row=2, column=0, columnspan=2, pady=(8, 0))
         self.fetch_btn = ttk.Button(btn_frame, text="Fetch & Preview", command=self.fetch_sale)
         self.fetch_btn.pack(side=tk.LEFT, padx=(0, 6))
         self.print_btn = ttk.Button(btn_frame, text="Print Ticket", command=self.print_ticket, state=tk.DISABLED)
@@ -175,19 +195,21 @@ class TicketPrinterApp:
         self.ticket_text = ""
 
     def fetch_sale(self):
-        sale_id = self.sale_id_entry.get().strip()
-        if not sale_id:
-            messagebox.showwarning("Input required", "Enter a Sale ID")
+        doc_id = self.sale_id_entry.get().strip()
+        if not doc_id:
+            messagebox.showwarning("Input required", "Enter an ID")
             return
-        if not sale_id.isdigit():
-            messagebox.showwarning("Invalid ID", "Sale ID must be a number")
+        if not doc_id.isdigit():
+            messagebox.showwarning("Invalid ID", "ID must be a number")
             return
 
         server_url = self.server_url_var.get().strip()
+        ticket_type = self.ticket_type_var.get()
         try:
             self.fetch_btn.config(text="Fetching...", state=tk.DISABLED)
             self.root.update()
-            self.sale_data = fetch_sale_data(server_url, sale_id)
+            self.sale_data = fetch_ticket_data(server_url, doc_id, ticket_type)
+            self.ticket_type = ticket_type
             self.build_ticket_text()
             self.print_btn.config(state=tk.NORMAL)
             self.fetch_btn.config(text="Fetch & Preview", state=tk.NORMAL)
@@ -205,7 +227,8 @@ class TicketPrinterApp:
         if not self.sale_data:
             return
         store = self.store_name_var.get().strip() or DEFAULT_CONFIG["store_name"]
-        self.ticket_text = format_ticket(self.sale_data, store)
+        ticket_type = getattr(self, 'ticket_type', 'sale')
+        self.ticket_text = format_ticket(self.sale_data, store, ticket_type)
         self.preview_text.delete(1.0, tk.END)
         self.preview_text.insert(1.0, self.ticket_text)
 
@@ -264,6 +287,65 @@ class TicketPrinterApp:
 
 
 # ---------------------------------------------------------------------------
+# Barcode label generation
+# ---------------------------------------------------------------------------
+LABEL_W = 0.75 * inch + 1 * mm
+LABEL_H = 0.5 * inch + 0.5 * mm
+COLS = 14
+ROWS = 16
+LABELS_PER_SHEET = COLS * ROWS
+
+PAGE_W, PAGE_H = landscape(letter)
+MARGIN_L = (PAGE_W - COLS * LABEL_W) / 2
+MARGIN_T = (PAGE_H - ROWS * LABEL_H) / 2
+
+BARCODE_MAX_W = LABEL_W * 0.85
+
+
+def get_barcode_drawing(data):
+    return code128.Code128(str(data), barHeight=10 * mm,
+                           barWidth=0.15 * mm, quiet=False,
+                           humanReadable=True, fontSize=5)
+
+
+def draw_barcode(c, bc, x, y):
+    c.setStrokeColorRGB(0.8, 0.8, 0.8)
+    c.setLineWidth(0.2)
+    c.rect(x, y, LABEL_W, LABEL_H)
+    w = bc.width
+    h = bc.height
+    scale = min(BARCODE_MAX_W / w if w > 0 else 1, 1.0)
+    if scale < 1.0:
+        c.saveState()
+        c.translate(x + (LABEL_W - w * scale) / 2,
+                    y + (LABEL_H - h * scale) / 2)
+        c.scale(scale, scale)
+        bc.drawOn(c, 0, 0)
+        c.restoreState()
+    else:
+        bx = x + (LABEL_W - w) / 2
+        by = y + (LABEL_H - h) / 2
+        bc.drawOn(c, bx, by)
+
+
+def generate_barcode_pdf(number, sheets):
+    buf = BytesIO()
+    c = canvas.Canvas(buf, pagesize=landscape(letter))
+    for sheet in range(sheets):
+        bc = get_barcode_drawing(number)
+        for row in range(ROWS):
+            for col in range(COLS):
+                x = MARGIN_L + col * LABEL_W
+                y = MARGIN_T + (ROWS - 1 - row) * LABEL_H
+                draw_barcode(c, bc, x, y)
+        if sheet < sheets - 1:
+            c.showPage()
+    c.save()
+    buf.seek(0)
+    return buf
+
+
+# ---------------------------------------------------------------------------
 # Web server mode
 # ---------------------------------------------------------------------------
 web_app = Flask(__name__)
@@ -275,7 +357,7 @@ WEB_HTML = """\
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
-<title>Ticket Printer</title>
+<title>Ferreteria Leon</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#f0f0f0;color:#333;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;padding:16px;min-height:100dvh}
@@ -283,15 +365,25 @@ body{background:#f0f0f0;color:#333;font-family:-apple-system,BlinkMacSystemFont,
 .header{background:#fff;border-radius:10px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1)}
 .header h1{font-size:1.2rem;color:#444;font-weight:600}
 .header p{font-size:.8rem;color:#888;margin-top:4px}
+.tabs{display:flex;gap:6px}
+.tab{flex:1;padding:12px;text-align:center;background:#ddd;border:none;border-radius:8px;cursor:pointer;font-size:.95rem;font-weight:600;color:#666;transition:all .2s}
+.tab.active{background:#444;color:#fff}
+.tab:hover:not(.active){background:#ccc}
+.section{display:none;flex-direction:column;gap:12px}
+.section.active{display:flex}
 .card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.1);display:flex;flex-direction:column;gap:12px}
 label{font-size:.85rem;color:#666;font-weight:500}
-input[type=number]{width:100%;padding:14px;font-size:1.2rem;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#333;outline:none;transition:border-color .2s}
-input[type=number]:focus{border-color:#888;background:#fff}
+input[type=number],input[type=text]{width:100%;padding:14px;font-size:1.2rem;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#333;outline:none;transition:border-color .2s}
+input[type=number]:focus,input[type=text]:focus{border-color:#888;background:#fff}
+input.small{width:100px;font-size:1rem;padding:10px 14px}
+.hint{font-size:.75rem;color:#999;margin-top:2px}
 .btn{width:100%;padding:14px;font-size:1.1rem;border:none;border-radius:8px;cursor:pointer;color:#fff;font-weight:600;transition:opacity .2s}
 .btn-preview{background:#777}
 .btn-preview:hover{opacity:.9}
 .btn-print{background:#444}
 .btn-print:hover{opacity:.9}
+.btn-barcode{background:#2a7a4a}
+.btn-barcode:hover{opacity:.9}
 .btn:disabled{opacity:.4;cursor:not-allowed}
 #preview{background:#fafafa;border:1px solid #ddd;border-radius:8px;padding:12px;font-family:monospace;font-size:11px;line-height:1.3;white-space:pre;overflow-x:auto;min-height:60px;color:#333;display:none}
 .toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:8px;color:#fff;font-weight:600;z-index:999;display:none;max-width:90%;box-shadow:0 2px 8px rgba(0,0,0,.15)}
@@ -303,29 +395,61 @@ input[type=number]:focus{border-color:#888;background:#fff}
 <body>
 <div class=container>
 <div class=header>
-<h1>Ticket Printer</h1>
-<p>Ferreteria Leon</p>
+<h1>Ferreteria Leon</h1>
+<p>Herramientas y Ferreteria</p>
 </div>
-<div class=card>
-<label for=sale_id>Sale ID</label>
-<input type=number id=sale_id placeholder="Ingrese ID de venta" inputmode=numeric>
+<div class=tabs>
+<button class="tab active" id=tabTicket onclick="switchTab('ticket')">Ticket</button>
+<button class=tab id=tabBarcode onclick="switchTab('barcode')">Codigos de Barras</button>
+</div>
+<div class="card section active" id=secTicket>
+<label for=ticket_type>Tipo</label>
+<select id=ticket_type style="width:100%;padding:14px;font-size:1.2rem;border:1px solid #ccc;border-radius:8px;background:#fafafa;color:#333;outline:none;appearance:auto">
+<option value=sale>Venta</option>
+<option value=quote>Cotizacion</option>
+<option value=devolution>Devolucion</option>
+</select>
+<label for=sale_id style=margin-top:4px>ID</label>
+<input type=number id=sale_id placeholder="Ingrese ID" inputmode=numeric>
 <button class="btn btn-preview" id=previewBtn onclick=doPreview()>&#x1F50D; Vista Previa</button>
 <div id=preview></div>
 <button class="btn btn-print" id=printBtn onclick=doPrint() disabled>&#x1F5B6; Imprimir</button>
 </div>
-<div class=footer>Ticket Printer v2</div>
+<div class="card section" id=secBarcode>
+<label for=bc_number>Numero del codigo de barras</label>
+<input type=text id=bc_number placeholder="Ej: 123456" inputmode=numeric>
+<label for=bc_sheets style=margin-top:4px>Cantidad de hojas</label>
+<div style=display:flex;align-items:center;gap:8px>
+<input type=number class=small id=bc_sheets value=1 min=1>
+<span class=hint>224 etiquetas / hoja</span>
+</div>
+<button class="btn btn-barcode" id=barcodeBtn onclick=downloadBarcode()>&#x1F4E5; Generar PDF</button>
+</div>
+<div class=footer>v2</div>
 </div>
 <div id=toast class=toast></div>
 <script>
 let currentId='';
 function showToast(msg,type){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+type;t.style.display='block';setTimeout(()=>t.style.display='none',3000)}
+function switchTab(tab){
+document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+if(tab==='ticket'){
+document.getElementById('tabTicket').classList.add('active');
+document.getElementById('secTicket').classList.add('active');
+}else{
+document.getElementById('tabBarcode').classList.add('active');
+document.getElementById('secBarcode').classList.add('active');
+}
+}
 async function doPreview(){
 const id=document.getElementById('sale_id').value.trim();
-if(!id)return showToast('Ingrese un Sale ID','err');
+if(!id)return showToast('Ingrese un ID','err');
+const tt=document.getElementById('ticket_type').value;
 document.getElementById('previewBtn').disabled=true;
 document.getElementById('previewBtn').textContent='Cargando...';
 try{
-const r=await fetch('/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sale_id:id})});
+const r=await fetch('/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sale_id:id,ticket_type:tt})});
 const d=await r.json();
 if(d.error){showToast(d.error,'err');document.getElementById('preview').style.display='none';return}
 document.getElementById('preview').textContent=d.ticket_text;
@@ -338,14 +462,39 @@ finally{document.getElementById('previewBtn').disabled=false;document.getElement
 }
 async function doPrint(){
 if(!currentId)return showToast('Primero haga vista previa','err');
+const tt=document.getElementById('ticket_type').value;
 document.getElementById('printBtn').disabled=true;
 document.getElementById('printBtn').textContent='Imprimiendo...';
 try{
-const r=await fetch('/print',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sale_id:currentId})});
+const r=await fetch('/print',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sale_id:currentId,ticket_type:tt})});
 const d=await r.json();
 if(d.success){showToast('Ticket impreso exitosamente','ok')}else{showToast(d.error||'Error al imprimir','err')}
 }catch(e){showToast('Error de conexion','err')}
 finally{document.getElementById('printBtn').disabled=false;document.getElementById('printBtn').innerHTML='&#x1F5B6; Imprimir'}
+}
+async function downloadBarcode(){
+const num=document.getElementById('bc_number').value.trim();
+if(!num)return showToast('Ingrese un numero','err');
+if(!/^\d+$/.test(num))return showToast('Solo digitos permitidos','err');
+const sheets=parseInt(document.getElementById('bc_sheets').value)||1;
+if(sheets<1)return showToast('Hojas debe ser >= 1','err');
+document.getElementById('barcodeBtn').disabled=true;
+document.getElementById('barcodeBtn').textContent='Generando...';
+try{
+const r=await fetch('/barcode/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({number:num,sheets:sheets})});
+if(!r.ok){const d=await r.json();showToast(d.error||'Error al generar','err');return}
+const blob=await r.blob();
+const url=URL.createObjectURL(blob);
+const a=document.createElement('a');
+a.href=url;
+a.download='codigo_'+num+'_s16986.pdf';
+document.body.appendChild(a);
+a.click();
+document.body.removeChild(a);
+URL.revokeObjectURL(url);
+showToast('PDF generado exitosamente','ok')
+}catch(e){showToast('Error de conexion','err')}
+finally{document.getElementById('barcodeBtn').disabled=false;document.getElementById('barcodeBtn').innerHTML='&#x1F4E5; Generar PDF'}
 }
 </script>
 </body>
@@ -362,14 +511,17 @@ def index():
 def preview():
     data = request.get_json(silent=True)
     if not data or 'sale_id' not in data:
-        return jsonify(error="Sale ID requerido"), 400
-    sale_id = str(data['sale_id']).strip()
-    if not sale_id.isdigit():
-        return jsonify(error="Sale ID debe ser un numero"), 400
+        return jsonify(error="ID requerido"), 400
+    doc_id = str(data['sale_id']).strip()
+    if not doc_id.isdigit():
+        return jsonify(error="ID debe ser un numero"), 400
+    ticket_type = data.get('ticket_type', 'sale')
+    if ticket_type not in TICKET_TYPES:
+        return jsonify(error="Tipo de ticket invalido"), 400
     cfg = web_app.config
     try:
-        sale_data = fetch_sale_data(cfg.get("server_url", DEFAULT_CONFIG["server_url"]), sale_id)
-        ticket_text = format_ticket(sale_data, cfg.get("store_name", DEFAULT_CONFIG["store_name"]))
+        ticket_data = fetch_ticket_data(cfg.get("server_url", DEFAULT_CONFIG["server_url"]), doc_id, ticket_type)
+        ticket_text = format_ticket(ticket_data, cfg.get("store_name", DEFAULT_CONFIG["store_name"]), ticket_type)
         return jsonify(ticket_text=ticket_text)
     except requests.ConnectionError:
         return jsonify(error="No se pudo conectar al servidor"), 502
@@ -383,19 +535,53 @@ def preview():
 def web_print():
     data = request.get_json(silent=True)
     if not data or 'sale_id' not in data:
-        return jsonify(error="Sale ID requerido"), 400
-    sale_id = str(data['sale_id']).strip()
-    if not sale_id.isdigit():
-        return jsonify(error="Sale ID debe ser un numero"), 400
+        return jsonify(error="ID requerido"), 400
+    doc_id = str(data['sale_id']).strip()
+    if not doc_id.isdigit():
+        return jsonify(error="ID debe ser un numero"), 400
+    ticket_type = data.get('ticket_type', 'sale')
+    if ticket_type not in TICKET_TYPES:
+        return jsonify(error="Tipo de ticket invalido"), 400
     cfg = web_app.config
     try:
-        sale_data = fetch_sale_data(cfg.get("server_url", DEFAULT_CONFIG["server_url"]), sale_id)
-        ticket_text = format_ticket(sale_data, cfg.get("store_name", DEFAULT_CONFIG["store_name"]))
+        ticket_data = fetch_ticket_data(cfg.get("server_url", DEFAULT_CONFIG["server_url"]), doc_id, ticket_type)
+        ticket_text = format_ticket(ticket_data, cfg.get("store_name", DEFAULT_CONFIG["store_name"]), ticket_type)
         printer_name = cfg.get("cups_printer", DEFAULT_CONFIG["cups_printer"])
         print_ticket_text(ticket_text, printer_name)
         return jsonify(success=True, message="Ticket impreso exitosamente")
     except requests.ConnectionError:
         return jsonify(error="No se pudo conectar al servidor"), 502
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
+@web_app.route('/barcode/generate', methods=['POST'])
+def barcode_generate():
+    data = request.get_json(silent=True)
+    if not data or 'number' not in data:
+        return jsonify(error="Número requerido"), 400
+    number = str(data['number']).strip()
+    if not number.isdigit():
+        return jsonify(error="El número debe contener solo dígitos"), 400
+
+    sheets = 1
+    if 'sheets' in data:
+        try:
+            sheets = int(data['sheets'])
+            if sheets < 1:
+                raise ValueError
+        except (ValueError, TypeError):
+            return jsonify(error="Hojas debe ser un número entero >= 1"), 400
+
+    try:
+        pdf_buf = generate_barcode_pdf(number, sheets)
+        filename = f"codigo_{number}_s16986.pdf"
+        return send_file(
+            pdf_buf,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
     except Exception as e:
         return jsonify(error=str(e)), 500
 
