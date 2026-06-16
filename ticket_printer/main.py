@@ -593,15 +593,19 @@ def preview():
         return jsonify(error=str(e)), 500
 
 
-@web_app.route('/print', methods=['POST'])
+@web_app.route('/print', methods=['GET', 'POST'])
 def web_print():
-    data = request.get_json(silent=True)
-    if not data or 'sale_id' not in data:
-        return jsonify(error="ID requerido"), 400
-    doc_id = str(data['sale_id']).strip()
+    if request.method == 'GET':
+        doc_id = request.args.get('sale_id', '').strip()
+        ticket_type = request.args.get('ticket_type', 'sale')
+    else:
+        data = request.get_json(silent=True)
+        if not data or 'sale_id' not in data:
+            return jsonify(error="ID requerido"), 400
+        doc_id = str(data['sale_id']).strip()
+        ticket_type = data.get('ticket_type', 'sale')
     if not doc_id.isdigit():
         return jsonify(error="ID debe ser un numero"), 400
-    ticket_type = data.get('ticket_type', 'sale')
     if ticket_type not in TICKET_TYPES:
         return jsonify(error="Tipo de ticket invalido"), 400
     cfg = web_app.config
@@ -610,10 +614,47 @@ def web_print():
         ticket_text = format_ticket(ticket_data, cfg.get("store_name", DEFAULT_CONFIG["store_name"]), ticket_type)
         printer_name = cfg.get("cups_printer", DEFAULT_CONFIG["cups_printer"])
         print_ticket_text(ticket_text, printer_name)
+        if request.method == 'GET':
+            return f'''<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><title>Imprimiendo...</title></head>
+<body style="font-family:sans-serif;text-align:center;padding-top:40px;background:#f5f5f5"
+      onload="setTimeout(window.close, 2000)">
+  <div style="background:#fff;border-radius:8px;padding:30px;margin:20px;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+    <h2 style="color:#28a745">✅ Imprimiendo</h2>
+    <p style="color:#555;font-size:16px">Ticket #{doc_id} enviado a la impresora</p>
+    <p style="color:#999;font-size:12px">Esta ventana se cerrar\u00e1 autom\u00e1ticamente</p>
+  </div>
+</body>
+</html>'''
         return jsonify(success=True, message="Ticket impreso exitosamente")
     except requests.ConnectionError:
+        if request.method == 'GET':
+            return '''<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><title>Error</title></head>
+<body style="font-family:sans-serif;text-align:center;padding-top:40px;background:#f5f5f5"
+      onload="setTimeout(window.close, 3000)">
+  <div style="background:#fff;border-radius:8px;padding:30px;margin:20px;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+    <h2 style="color:#dc3545">\u274c Error de conexi\u00f3n</h2>
+    <p style="color:#555;font-size:16px">No se pudo conectar al servidor</p>
+  </div>
+</body>
+</html>'''
         return jsonify(error="No se pudo conectar al servidor"), 502
     except Exception as e:
+        if request.method == 'GET':
+            return f'''<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="UTF-8"><title>Error</title></head>
+<body style="font-family:sans-serif;text-align:center;padding-top:40px;background:#f5f5f5"
+      onload="setTimeout(window.close, 3000)">
+  <div style="background:#fff;border-radius:8px;padding:30px;margin:20px;box-shadow:0 2px 8px rgba(0,0,0,0.1)">
+    <h2 style="color:#dc3545">\u274c Error</h2>
+    <p style="color:#555;font-size:16px">{str(e)}</p>
+  </div>
+</body>
+</html>'''
         return jsonify(error=str(e)), 500
 
 
