@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import sys
 import threading
+import time
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from io import BytesIO
@@ -693,8 +694,44 @@ def barcode_generate():
         return jsonify(error=str(e)), 500
 
 
+def poll_print_jobs():
+    """Background thread: poll VPS for pending print jobs and print them."""
+    cfg = load_config()
+    server_url = cfg.get("server_url", DEFAULT_CONFIG["server_url"])
+    printer_name = cfg.get("cups_printer", DEFAULT_CONFIG["cups_printer"])
+    store_name = cfg.get("store_name", DEFAULT_CONFIG["store_name"])
+    poll_url = server_url.rstrip('/') + '/pos/get-pending-prints/'
+
+    while True:
+        try:
+            resp = requests.get(poll_url, timeout=10, verify=False)
+            if resp.status_code == 200:
+                jobs = resp.json()
+                for job in jobs:
+                    job_id = job.get('job_id')
+                    sale_id = job.get('sale_id')
+                    ticket_type = job.get('ticket_type', 'sale')
+                    if not sale_id or not job_id:
+                        continue
+                    try:
+                        ticket_data = fetch_ticket_data(server_url, sale_id, ticket_type)
+                        ticket_text = format_ticket(ticket_data, store_name, ticket_type)
+                        print_ticket_text(ticket_text, printer_name)
+                        # Ack
+                        ack_url = server_url.rstrip('/') + '/pos/ack-print/' + job_id + '/'
+                        requests.post(ack_url, json={}, timeout=10, verify=False)
+                        print("Printed ticket #{} (job {})".format(sale_id, job_id))
+                    except Exception as e:
+                        print("Print job {} failed: {}".format(job_id, e))
+        except Exception as e:
+            pass  # Server unreachable, try again next cycle
+        time.sleep(3)
+
+
 def start_web_server():
     print("Web server starting on http://0.0.0.0:5000")
+    t = threading.Thread(target=poll_print_jobs, daemon=True)
+    t.start()
     web_app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
 
 
