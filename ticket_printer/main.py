@@ -748,6 +748,7 @@ def auto_print_worker():
                             f.write(str(last_id))
             else:
                 print("Poll returned status {} for URL: {}".format(resp.status_code, url))
+                print("Response body: {}".format(resp.text[:500]))
         except requests.ConnectionError:
             print("Poll: connection error (VPS unreachable)")
         except Exception as e:
