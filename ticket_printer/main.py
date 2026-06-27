@@ -718,7 +718,15 @@ def auto_print_worker():
             url = server_url.rstrip('/') + '/pos/pending-auto-prints/?after=' + str(last_id)
             resp = requests.get(url, timeout=15, verify=False)
             if resp.status_code == 200:
-                sales = resp.json()
+                data = resp.json()
+                latest_id = data.get('latest_id', 0)
+                # First run: skip all existing sales, start from latest
+                if last_id == 0 and latest_id > 0:
+                    last_id = latest_id
+                    with open(last_id_file, 'w') as f:
+                        f.write(str(last_id))
+                    print("First run: skipping to latest sale #{}".format(latest_id))
+                sales = data.get('sales', [])
                 if sales:
                     print("Found {} sale(s) to print after ID {}".format(len(sales), last_id))
                 for sale in sales:
