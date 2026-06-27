@@ -717,8 +717,9 @@ def auto_print_worker():
                     jid = job['job_id']
                     print("Printing job {} (sale #{})...".format(jid, sid))
                     try:
-                        ticket_data = fetch_ticket_data(server_url, sid, 'sale')
-                        ticket_text = format_ticket(ticket_data, store_name, 'sale')
+                        ticket_type = job.get('ticket_type', 'sale')
+                        ticket_data = fetch_ticket_data(server_url, sid, ticket_type)
+                        ticket_text = format_ticket(ticket_data, store_name, ticket_type)
                         print_ticket_text(ticket_text, printer_name)
                         requests.post(server_url + '/pos/ack-print/{}/'.format(jid),
                                       timeout=10, verify=False)
