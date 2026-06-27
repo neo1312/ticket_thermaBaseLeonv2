@@ -702,10 +702,12 @@ def auto_print_worker():
     server_url = cfg.get("server_url", DEFAULT_CONFIG["server_url"]).rstrip('/')
     printer_name = cfg.get("cups_printer", DEFAULT_CONFIG["cups_printer"])
     store_name = cfg.get("store_name", DEFAULT_CONFIG["store_name"])
+    poll_url = server_url + '/pos/get-pending-prints/'
+    print("Polling URL: {}".format(poll_url))
 
     while True:
         try:
-            resp = requests.get(server_url + '/pos/get-pending-prints/', timeout=15, verify=False)
+            resp = requests.get(poll_url, timeout=15, verify=False)
             if resp.status_code == 200:
                 jobs = resp.json()
                 if jobs:
@@ -724,12 +726,12 @@ def auto_print_worker():
                     except Exception as e:
                         print("FAILED job {}: {}".format(jid, e))
             else:
-                print("Poll returned status {} for URL: {}/pos/get-pending-prints/".format(
-                    resp.status_code, server_url))
-        except requests.ConnectionError:
-            print("Poll: VPS unreachable")
+                print("Poll returned status {} for URL: {}".format(
+                    resp.status_code, poll_url))
+        except requests.ConnectionError as e:
+            print("Poll: VPS unreachable - {} {}".format(type(e).__name__, e))
         except Exception as e:
-            print("Poll error: {}".format(e))
+            print("Poll error: {}: {}".format(type(e).__name__, e))
         time.sleep(5)
 
 
