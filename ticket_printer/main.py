@@ -697,43 +697,54 @@ def barcode_generate():
 
 def auto_print_worker():
     """Background thread: poll VPS for new sales and auto-print them."""
+    print("Auto-print worker started")
+    sys.stderr.flush()
     cfg = load_config()
     server_url = cfg.get("server_url", DEFAULT_CONFIG["server_url"])
     printer_name = cfg.get("cups_printer", DEFAULT_CONFIG["cups_printer"])
     store_name = cfg.get("store_name", DEFAULT_CONFIG["store_name"])
-    last_id_file = os.path.join(os.path.dirname(__file__), '.last_printed_id')
+    last_id_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.last_printed_id')
 
     try:
         with open(last_id_file) as f:
             last_id = int(f.read().strip())
+            print("Resumed from last printed ID: {}".format(last_id))
     except (FileNotFoundError, ValueError):
         last_id = 0
+        print("Starting fresh, last_id=0")
 
     while True:
         try:
-            resp = requests.get(
-                server_url.rstrip('/') + '/pos/pending-auto-prints/?after=' + str(last_id),
-                timeout=10, verify=False
-            )
+            url = server_url.rstrip('/') + '/pos/pending-auto-prints/?after=' + str(last_id)
+            resp = requests.get(url, timeout=15, verify=False)
             if resp.status_code == 200:
                 sales = resp.json()
+                if sales:
+                    print("Found {} sale(s) to print after ID {}".format(len(sales), last_id))
                 for sale in sales:
                     sid = sale['id']
                     try:
+                        print("Fetching ticket #{}...".format(sid))
                         ticket_data = fetch_ticket_data(server_url, sid, 'sale')
                         ticket_text = format_ticket(ticket_data, store_name, 'sale')
                         print_ticket_text(ticket_text, printer_name)
                         last_id = sid
                         with open(last_id_file, 'w') as f:
                             f.write(str(last_id))
-                        print("Auto-printed ticket #{}".format(sid))
+                        print("Printed ticket #{}".format(sid))
                     except Exception as e:
-                        print("Failed to print ticket #{}: {}".format(sid, e))
-                        break
+                        print("FAILED ticket #{}: {}".format(sid, e))
+                        # Skip broken sale so we don't get stuck
+                        last_id = sid
+                        with open(last_id_file, 'w') as f:
+                            f.write(str(last_id))
+            else:
+                print("Poll returned status {} for URL: {}".format(resp.status_code, url))
         except requests.ConnectionError:
-            pass
+            print("Poll: connection error (VPS unreachable)")
         except Exception as e:
-            print("Auto-print poll error: {}".format(e))
+            print("Poll error: {}".format(e))
+        sys.stderr.flush()
         time.sleep(5)
 
 
