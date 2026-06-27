@@ -696,64 +696,40 @@ def barcode_generate():
 
 
 def auto_print_worker():
-    """Background thread: poll VPS for new sales and auto-print them."""
+    """Poll VPS for queued print jobs (no ID tracking, no .last_printed_id)."""
     print("Auto-print worker started")
-    sys.stderr.flush()
     cfg = load_config()
-    server_url = cfg.get("server_url", DEFAULT_CONFIG["server_url"])
+    server_url = cfg.get("server_url", DEFAULT_CONFIG["server_url"]).rstrip('/')
     printer_name = cfg.get("cups_printer", DEFAULT_CONFIG["cups_printer"])
     store_name = cfg.get("store_name", DEFAULT_CONFIG["store_name"])
-    last_id_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.last_printed_id')
-
-    try:
-        with open(last_id_file) as f:
-            last_id = int(f.read().strip())
-            print("Resumed from last printed ID: {}".format(last_id))
-    except (FileNotFoundError, ValueError):
-        last_id = 0
-        print("Starting fresh, last_id=0")
 
     while True:
         try:
-            url = server_url.rstrip('/') + '/pos/pending-auto-prints/?after=' + str(last_id)
-            resp = requests.get(url, timeout=15, verify=False)
+            resp = requests.get(server_url + '/pos/get-pending-prints/', timeout=15, verify=False)
             if resp.status_code == 200:
-                data = resp.json()
-                latest_id = data.get('latest_id', 0)
-                # First run: skip all existing sales, start from latest
-                if last_id == 0 and latest_id > 0:
-                    last_id = latest_id
-                    with open(last_id_file, 'w') as f:
-                        f.write(str(last_id))
-                    print("First run: skipping to latest sale #{}".format(latest_id))
-                sales = data.get('sales', [])
-                if sales:
-                    print("Found {} sale(s) to print after ID {}".format(len(sales), last_id))
-                for sale in sales:
-                    sid = sale['id']
+                jobs = resp.json()
+                if jobs:
+                    print("Found {} pending print job(s)".format(len(jobs)))
+                for job in jobs:
+                    sid = job['sale_id']
+                    jid = job['job_id']
+                    print("Printing job {} (sale #{})...".format(jid, sid))
                     try:
-                        print("Fetching ticket #{}...".format(sid))
                         ticket_data = fetch_ticket_data(server_url, sid, 'sale')
                         ticket_text = format_ticket(ticket_data, store_name, 'sale')
                         print_ticket_text(ticket_text, printer_name)
-                        last_id = sid
-                        with open(last_id_file, 'w') as f:
-                            f.write(str(last_id))
-                        print("Printed ticket #{}".format(sid))
+                        requests.post(server_url + '/pos/ack-print/{}/'.format(jid),
+                                      timeout=10, verify=False)
+                        print("Printed job {}".format(jid))
                     except Exception as e:
-                        print("FAILED ticket #{}: {}".format(sid, e))
-                        # Skip broken sale so we don't get stuck
-                        last_id = sid
-                        with open(last_id_file, 'w') as f:
-                            f.write(str(last_id))
+                        print("FAILED job {}: {}".format(jid, e))
             else:
-                print("Poll returned status {} for URL: {}".format(resp.status_code, url))
-                print("Response body: {}".format(resp.text[:500]))
+                print("Poll returned status {} for URL: {}/pos/get-pending-prints/".format(
+                    resp.status_code, server_url))
         except requests.ConnectionError:
-            print("Poll: connection error (VPS unreachable)")
+            print("Poll: VPS unreachable")
         except Exception as e:
             print("Poll error: {}".format(e))
-        sys.stderr.flush()
         time.sleep(5)
 
 
