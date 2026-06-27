@@ -8,6 +8,7 @@ import re
 import unicodedata
 import subprocess
 import tempfile
+import os
 import sys
 import threading
 import time
@@ -700,25 +701,40 @@ def auto_print_worker():
     server_url = cfg.get("server_url", DEFAULT_CONFIG["server_url"])
     printer_name = cfg.get("cups_printer", DEFAULT_CONFIG["cups_printer"])
     store_name = cfg.get("store_name", DEFAULT_CONFIG["store_name"])
-    last_id = 0
+    last_id_file = os.path.join(os.path.dirname(__file__), '.last_printed_id')
+
+    try:
+        with open(last_id_file) as f:
+            last_id = int(f.read().strip())
+    except (FileNotFoundError, ValueError):
+        last_id = 0
 
     while True:
         try:
-            ticket_data = fetch_ticket_data(server_url, last_id + 1, 'sale')
-            ticket_text = format_ticket(ticket_data, store_name, 'sale')
-            print_ticket_text(ticket_text, printer_name)
-            last_id += 1
-            print("Auto-printed ticket #{}".format(last_id))
-        except requests.HTTPError as e:
-            if e.response.status_code == 404:
-                time.sleep(5)
-            else:
-                time.sleep(3)
+            resp = requests.get(
+                server_url.rstrip('/') + '/pos/pending-auto-prints/?after=' + str(last_id),
+                timeout=10, verify=False
+            )
+            if resp.status_code == 200:
+                sales = resp.json()
+                for sale in sales:
+                    sid = sale['id']
+                    try:
+                        ticket_data = fetch_ticket_data(server_url, sid, 'sale')
+                        ticket_text = format_ticket(ticket_data, store_name, 'sale')
+                        print_ticket_text(ticket_text, printer_name)
+                        last_id = sid
+                        with open(last_id_file, 'w') as f:
+                            f.write(str(last_id))
+                        print("Auto-printed ticket #{}".format(sid))
+                    except Exception as e:
+                        print("Failed to print ticket #{}: {}".format(sid, e))
+                        break
         except requests.ConnectionError:
-            time.sleep(10)
+            pass
         except Exception as e:
-            print("Auto-print error: {}".format(e))
-            time.sleep(5)
+            print("Auto-print poll error: {}".format(e))
+        time.sleep(5)
 
 
 def start_web_server():
