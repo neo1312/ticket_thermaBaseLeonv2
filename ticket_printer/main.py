@@ -717,7 +717,10 @@ def auto_print_worker():
                     jid = job['job_id']
                     print("Printing job {} (sale #{})...".format(jid, sid))
                     try:
-                        ticket_type = job.get('ticket_type', 'sale')
+                        ticket_type = job.get('ticket_type')
+                        if not ticket_type:
+                            parts = jid.split('_')
+                            ticket_type = parts[1] if len(parts) >= 4 and parts[0] == 'print' else 'sale'
                         ticket_data = fetch_ticket_data(server_url, sid, ticket_type)
                         ticket_text = format_ticket(ticket_data, store_name, ticket_type)
                         print_ticket_text(ticket_text, printer_name)
