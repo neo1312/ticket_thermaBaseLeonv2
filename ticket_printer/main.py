@@ -167,51 +167,62 @@ def _read_until_enter(device, timeout=0.5):
 
 
 def _find_scanner(known_name=None):
-    """Find a keyboard-like input device (prefer USB, exclude main keyboard)."""
+    """Find a barcode scanner input device."""
     candidates = []
     for path in evdev.list_devices():
         try:
             dev = evdev.InputDevice(path)
+        except PermissionError:
+            print("Permission denied reading {}".format(path))
+            print("Add user to 'input' group: sudo usermod -a -G input $USER")
+            continue
+        except Exception as e:
+            continue
+        try:
             caps = dev.capabilities()
             if ecodes.EV_KEY not in caps:
-                dev.close()
                 continue
             keys = caps[ecodes.EV_KEY]
             has_digits = any(c in keys for c in range(2, 12))
             has_enter = ecodes.KEY_ENTER in keys or ecodes.KEY_KPENTER in keys
             if not (has_digits and has_enter):
-                dev.close()
                 continue
+            name = (dev.name or '').lower()
+            phys = (dev.phys or '').lower()
             if known_name and known_name in dev.name:
                 candidates.append(dev)
                 continue
-            phys = (dev.phys or '').lower()
-            name = (dev.name or '').lower()
-            if 'usb' in phys and 'keyboard' not in name:
+            if 'scan' in name or 'usbscn' in name or 'barcode' in name:
                 candidates.append(dev)
-            elif 'usb' in name or 'hid' in name:
+                continue
+            if 'usb' in phys and 'keyboard' not in name and 'at' not in phys:
                 candidates.append(dev)
-            else:
-                dev.close()
+                continue
+            if ('usb' in name or 'hid' in name) and 'keyboard' not in name:
+                candidates.append(dev)
+                continue
         except Exception:
-            try:
+            pass
+        finally:
+            if dev not in candidates:
                 dev.close()
-            except Exception:
-                pass
     if candidates:
+        print("Scanner candidates: {}".format([(c.path, c.name) for c in candidates]))
         for c in candidates[1:]:
             c.close()
         return candidates[0]
-    # fallback: try any keyboard device
+    # fallback: try ALL keyboard devices, pick first non-AT
     for path in evdev.list_devices():
         try:
             dev = evdev.InputDevice(path)
             caps = dev.capabilities()
             if ecodes.EV_KEY in caps:
                 keys = caps[ecodes.EV_KEY]
-                if (any(c in keys for c in range(2, 12)) and
-                        (ecodes.KEY_ENTER in keys or ecodes.KEY_KPENTER in keys)):
-                    return dev
+                if (any(c in keys for c in range(2, 11)) and
+                        ecodes.KEY_ENTER in keys):
+                    name = (dev.name or '').lower()
+                    if 'keyboard' not in name:
+                        return dev
             dev.close()
         except Exception:
             pass
