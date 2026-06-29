@@ -25,11 +25,7 @@ VENV="$DIR/venv"
     MODE="${1:-gui}"
     echo "Launching main.py (mode=$MODE)..."
     if [ "$MODE" = "web" ]; then
-        while true; do
-            "$VENV/bin/python3" main.py --web
-            echo "[$(date)] Server exited (code $?), restarting in 3s..."
-            sleep 3
-        done
+        "$VENV/bin/python3" main.py --web
     else
         "$VENV/bin/python3" main.py
     fi
