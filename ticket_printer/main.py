@@ -15,6 +15,8 @@ import time
 from datetime import datetime
 from flask import Flask, request, jsonify, send_file
 from io import BytesIO
+import evdev
+from evdev import ecodes
 
 from reportlab.graphics.barcode import code128
 from reportlab.pdfgen import canvas
@@ -38,6 +40,7 @@ DEFAULT_CONFIG = {
     "server_url": "https://5.75.162.179",
     "cups_printer": "ferre",
     "store_name": "Ferreteria Leon",
+    "pos_barcode_url": "https://5.75.162.179/pos/search-barcode/",
 }
 
 TICKET_TYPES = {
@@ -125,6 +128,134 @@ def print_ticket_text(text, printer_name):
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip())
     return True
+
+
+# ---------------------------------------------------------------------------
+# Barcode scanner listener (evdev)
+# ---------------------------------------------------------------------------
+KEY_MAP = {
+    2: '1', 3: '2', 4: '3', 5: '4', 6: '5',
+    7: '6', 8: '7', 9: '8', 10: '9', 11: '0',
+    71: '7', 72: '8', 73: '9', 74: '-', 75: '4',
+    76: '5', 77: '6', 78: '+', 79: '1', 80: '2',
+    81: '3', 82: '0', 83: '.', 96: '\n', 98: '/',
+    55: '*',
+}
+
+
+def _read_until_enter(device, timeout=0.5):
+    """Read digits from an evdev device until Enter or timeout."""
+    barcode = []
+    latest = 0
+    for event in device.read_loop():
+        if event.type != ecodes.EV_KEY or event.value != 1:
+            continue
+        now = time.time()
+        if latest and (now - latest) > timeout:
+            barcode.clear()
+        latest = now
+        code = event.code
+        if code == ecodes.KEY_ENTER or code == ecodes.KEY_KPENTER:
+            raw = ''.join(barcode)
+            if len(raw) >= 3:
+                return raw
+            barcode.clear()
+            continue
+        ch = KEY_MAP.get(code)
+        if ch is not None:
+            barcode.append(ch)
+
+
+def _find_scanner(known_name=None):
+    """Find a keyboard-like input device (prefer USB, exclude main keyboard)."""
+    candidates = []
+    for path in evdev.list_devices():
+        try:
+            dev = evdev.InputDevice(path)
+            caps = dev.capabilities()
+            if ecodes.EV_KEY not in caps:
+                dev.close()
+                continue
+            keys = caps[ecodes.EV_KEY]
+            has_digits = any(c in keys for c in range(2, 12))
+            has_enter = ecodes.KEY_ENTER in keys or ecodes.KEY_KPENTER in keys
+            if not (has_digits and has_enter):
+                dev.close()
+                continue
+            if known_name and known_name in dev.name:
+                candidates.append(dev)
+                continue
+            phys = (dev.phys or '').lower()
+            name = (dev.name or '').lower()
+            if 'usb' in phys and 'keyboard' not in name:
+                candidates.append(dev)
+            elif 'usb' in name or 'hid' in name:
+                candidates.append(dev)
+            else:
+                dev.close()
+        except Exception:
+            try:
+                dev.close()
+            except Exception:
+                pass
+    if candidates:
+        for c in candidates[1:]:
+            c.close()
+        return candidates[0]
+    # fallback: try any keyboard device
+    for path in evdev.list_devices():
+        try:
+            dev = evdev.InputDevice(path)
+            caps = dev.capabilities()
+            if ecodes.EV_KEY in caps:
+                keys = caps[ecodes.EV_KEY]
+                if (any(c in keys for c in range(2, 12)) and
+                        (ecodes.KEY_ENTER in keys or ecodes.KEY_KPENTER in keys)):
+                    return dev
+            dev.close()
+        except Exception:
+            pass
+    return None
+
+
+class BarcodeScannerListener:
+    """Read barcode scanner via evdev and POST to POS endpoint."""
+
+    def __init__(self, endpoint):
+        self.endpoint = endpoint
+        self.device = None
+
+    def find_and_listen(self):
+        device = _find_scanner()
+        if device is None:
+            print("No barcode scanner device found")
+            return
+        self.device = device
+        print("Scanner device: {} ({})".format(device.path, device.name))
+        try:
+            while True:
+                barcode = _read_until_enter(device)
+                if barcode:
+                    print("Scanned: {}".format(barcode))
+                    try:
+                        resp = requests.post(
+                            self.endpoint,
+                            json={"barcode": barcode},
+                            timeout=10,
+                            verify=False,
+                        )
+                        print("POST {} -> {}".format(self.endpoint, resp.status_code))
+                    except Exception as e:
+                        print("POST failed: {}".format(e))
+        except evdev.InputClosedError:
+            print("Scanner device disconnected")
+        finally:
+            device.close()
+
+    def start(self):
+        t = threading.Thread(target=self.find_and_listen, daemon=True)
+        t.start()
+        return t
 
 
 class TicketPrinterApp:
@@ -410,8 +541,9 @@ input.small{width:100px;font-size:1rem;padding:10px 14px}
 <div class=header>
 <h1>Ferreteria Leon</h1>
 <div class=nav>
-<a href=/ class=active>Ticket</a>
+ <a href=/ class=active>Ticket</a>
 <a href=/barcode>Codigos de Barras</a>
+<a href=/scan>Escaner</a>
 </div>
 </div>
 <div class=card>
@@ -509,8 +641,9 @@ input.small{width:100px;font-size:1rem;padding:10px 14px}
 <div class=header>
 <h1>Ferreteria Leon</h1>
 <div class=nav>
-<a href=/>Ticket</a>
+ <a href=/>Ticket</a>
 <a href=/barcode class=active>Codigos de Barras</a>
+<a href=/scan>Escaner</a>
 </div>
 </div>
 <div class=card>
@@ -666,6 +799,89 @@ def web_print():
         return jsonify(error=str(e)), 500
 
 
+@web_app.route('/api/barcode-scan', methods=['POST'])
+def api_barcode_scan():
+    data = request.get_json(silent=True)
+    if not data or 'barcode' not in data:
+        return jsonify(error="Barcode requerido"), 400
+    code = str(data['barcode']).strip()
+    if not code:
+        return jsonify(error="Barcode vacio"), 400
+    cfg = web_app.config
+    url = cfg.get("pos_barcode_url", DEFAULT_CONFIG["pos_barcode_url"])
+    try:
+        resp = requests.post(url, json={"barcode": code}, timeout=10, verify=False)
+        return jsonify(success=True, status=resp.status_code)
+    except requests.ConnectionError:
+        return jsonify(error="No se pudo conectar al POS"), 502
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
+
+WEB_HTML_SCAN = """\
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0,user-scalable=no">
+<title>Ferreteria Leon - Escaner</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#f0f0f0;color:#333;font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;padding:16px;min-height:100dvh}
+.container{width:100%;max-width:420px;display:flex;flex-direction:column;gap:14px}
+.header{background:#fff;border-radius:10px;padding:16px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+.header h1{font-size:1.2rem;color:#444;font-weight:600}
+.nav{display:flex;justify-content:center;gap:20px;margin-top:8px}
+.nav a{text-decoration:none;font-size:.85rem;font-weight:500;color:#999;padding:4px 0;transition:color .2s}
+.nav a.active{color:#444;font-weight:700}
+.card{background:#fff;border-radius:10px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.1)}
+input[type=text]{width:100%;padding:20px;font-size:2rem;border:2px solid #ccc;border-radius:8px;background:#fafafa;color:#333;outline:none;text-align:center;letter-spacing:4px;transition:border-color .2s}
+input[type=text]:focus{border-color:#2a7a4a;background:#fff}
+#feedback{margin-top:12px;padding:12px;border-radius:8px;text-align:center;font-weight:600;font-size:1rem;display:none}
+#feedback.ok{background:#d4edda;color:#155724;display:block}
+#feedback.err{background:#f8d7da;color:#721c24;display:block}
+#feedback.info{background:#cce5ff;color:#004085;display:block}
+.hint{text-align:center;color:#999;font-size:.8rem;margin-top:8px}
+.footer{text-align:center;font-size:.75rem;color:#aaa;padding:4px 0}
+</style>
+</head>
+<body>
+<div class=container>
+<div class=header>
+<h1>Ferreteria Leon</h1>
+<div class=nav>
+<a href=/>Ticket</a>
+<a href=/barcode>Codigos de Barras</a>
+<a href=/scan class=active>Escaner</a>
+</div>
+</div>
+<div class=card>
+<label for=barcode_input>Codigo de Barras</label>
+<input type=text id=barcode_input placeholder="Escanee o escriba..." inputmode=numeric autofocus>
+<div id=feedback></div>
+<p class=hint>Escanee el codigo de barras o escribalo manualmente</p>
+</div>
+<div class=footer>v2</div>
+</div>
+<script>
+const input=document.getElementById('barcode_input');
+const fb=document.getElementById('feedback');
+let timer=null;
+let buf='';
+input.addEventListener('input',function(){buf=this.value.replace(/[^0-9]/g,'');this.value=buf;clearTimeout(timer);if(buf.length>=3){timer=setTimeout(()=>submitBarcode(buf),200)}});
+input.addEventListener('keydown',function(e){if(e.key==='Enter'&&buf.length>=3){clearTimeout(timer);submitBarcode(buf)}});
+async function submitBarcode(code){const v=code||buf;if(!v||v.length<3)return;input.disabled=true;fb.className='';fb.textContent='Enviando...';fb.style.display='block';fb.className='info';try{const r=await fetch('/api/barcode-scan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({barcode:v})});const d=await r.json();if(d.error){fb.className='err';fb.textContent='Error: '+d.error}else{fb.className='ok';fb.textContent='Enviado: '+v}buf='';input.value=''}catch(e){fb.className='err';fb.textContent='Error de conexion'}input.disabled=false;setTimeout(()=>{fb.style.display='none'},3000);input.focus()}
+</script>
+</body>
+</html>
+"""
+
+
+@web_app.route('/scan')
+def scan_page():
+    return WEB_HTML_SCAN
+
+
 @web_app.route('/barcode/generate', methods=['POST'])
 def barcode_generate():
     data = request.get_json(silent=True)
@@ -747,9 +963,13 @@ def auto_print_worker():
 
 
 def start_web_server():
+    cfg = load_config()
     print("Web server starting on http://0.0.0.0:5000")
-    t = threading.Thread(target=auto_print_worker, daemon=True)
-    t.start()
+    t1 = threading.Thread(target=auto_print_worker, daemon=True)
+    t1.start()
+    barcode_url = cfg.get("pos_barcode_url", DEFAULT_CONFIG["pos_barcode_url"])
+    scanner = BarcodeScannerListener(barcode_url)
+    scanner.start()
     web_app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
 
 
