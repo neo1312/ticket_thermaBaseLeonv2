@@ -60,12 +60,18 @@ def save_config(config):
         json.dump(config, f, indent=2)
 
 
-def fetch_ticket_data(server_url, doc_id, ticket_type="sale"):
+def fetch_ticket_data(server_url, doc_id, ticket_type="sale", session=None):
     ep = TICKET_TYPES.get(ticket_type, TICKET_TYPES["sale"])["endpoint"]
     url = f"{server_url.rstrip('/')}{ep}{doc_id}"
-    resp = requests.get(url, timeout=10, verify=False)
-    resp.raise_for_status()
-    return resp.json()
+    http = session if session is not None else requests.Session()
+    close = session is None
+    try:
+        resp = http.get(url, timeout=10, verify=False)
+        resp.raise_for_status()
+        return resp.json()
+    finally:
+        if close:
+            http.close()
 
 
 def format_ticket(sale_data, store_name, ticket_type="sale"):
@@ -705,38 +711,39 @@ def auto_print_worker():
     poll_url = server_url + '/pos/get-pending-prints/'
     print("Polling URL: {}".format(poll_url))
 
-    while True:
-        try:
-            resp = requests.get(poll_url, timeout=15, verify=False)
-            if resp.status_code == 200:
-                jobs = resp.json()
-                if jobs:
-                    print("Found {} pending print job(s)".format(len(jobs)))
-                for job in jobs:
-                    sid = job['sale_id']
-                    jid = job['job_id']
-                    print("Printing job {} (sale #{})...".format(jid, sid))
-                    try:
-                        ticket_type = job.get('ticket_type')
-                        if not ticket_type:
-                            parts = jid.split('_')
-                            ticket_type = parts[1] if len(parts) >= 4 and parts[0] == 'print' else 'sale'
-                        ticket_data = fetch_ticket_data(server_url, sid, ticket_type)
-                        ticket_text = format_ticket(ticket_data, store_name, ticket_type)
-                        print_ticket_text(ticket_text, printer_name)
-                        requests.post(server_url + '/pos/ack-print/{}/'.format(jid),
-                                      timeout=10, verify=False)
-                        print("Printed job {}".format(jid))
-                    except Exception as e:
-                        print("FAILED job {}: {}".format(jid, e))
-            else:
-                print("Poll returned status {} for URL: {}".format(
-                    resp.status_code, poll_url))
-        except requests.ConnectionError as e:
-            print("Poll: VPS unreachable - {} {}".format(type(e).__name__, e))
-        except Exception as e:
-            print("Poll error: {}: {}".format(type(e).__name__, e))
-        time.sleep(5)
+    with requests.Session() as session:
+        while True:
+            try:
+                resp = session.get(poll_url, timeout=15, verify=False)
+                if resp.status_code == 200:
+                    jobs = resp.json()
+                    if jobs:
+                        print("Found {} pending print job(s)".format(len(jobs)))
+                    for job in jobs:
+                        sid = job['sale_id']
+                        jid = job['job_id']
+                        print("Printing job {} (sale #{})...".format(jid, sid))
+                        try:
+                            ticket_type = job.get('ticket_type')
+                            if not ticket_type:
+                                parts = jid.split('_')
+                                ticket_type = parts[1] if len(parts) >= 4 and parts[0] == 'print' else 'sale'
+                            ticket_data = fetch_ticket_data(server_url, sid, ticket_type, session=session)
+                            ticket_text = format_ticket(ticket_data, store_name, ticket_type)
+                            print_ticket_text(ticket_text, printer_name)
+                            session.post(server_url + '/pos/ack-print/{}/'.format(jid),
+                                          timeout=10, verify=False)
+                            print("Printed job {}".format(jid))
+                        except Exception as e:
+                            print("FAILED job {}: {}".format(jid, e))
+                else:
+                    print("Poll returned status {} for URL: {}".format(
+                        resp.status_code, poll_url))
+            except requests.ConnectionError as e:
+                print("Poll: VPS unreachable - {} {}".format(type(e).__name__, e))
+            except Exception as e:
+                print("Poll error: {}: {}".format(type(e).__name__, e))
+            time.sleep(5)
 
 
 def start_web_server():
