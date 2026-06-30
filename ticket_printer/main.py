@@ -235,6 +235,9 @@ class BarcodeScannerListener:
     def __init__(self, endpoint):
         self.endpoint = endpoint
         self.device = None
+        self._last_barcode = ""
+        self._last_time = 0
+        self._dedup_ms = 3000
 
     def find_and_listen(self):
         device = _find_scanner()
@@ -247,6 +250,11 @@ class BarcodeScannerListener:
             while True:
                 barcode = _read_until_enter(device)
                 if barcode:
+                    now = time.time()
+                    if barcode == self._last_barcode and (now - self._last_time) * 1000 < self._dedup_ms:
+                        continue
+                    self._last_barcode = barcode
+                    self._last_time = now
                     print("Scanned: {}".format(barcode), flush=True)
                     try:
                         resp = requests.post(
