@@ -40,7 +40,7 @@ DEFAULT_CONFIG = {
     "server_url": "https://5.75.162.179",
     "cups_printer": "ferre",
     "store_name": "Ferreteria Leon",
-    "pos_barcode_url": "https://5.75.162.179/pos/search-barcode/",
+    "pos_barcode_url": "https://5.75.162.179/pos/scanner-push/",
 }
 
 TICKET_TYPES = {
