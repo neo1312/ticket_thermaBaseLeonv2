@@ -4,12 +4,14 @@ set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 LOG="$DIR/run.log"
 VENV="$DIR/venv"
+export PYTHONUNBUFFERED=1
 
 {
     echo "===== $(date) ====="
     echo "DIR=$DIR"
 
     cd "$DIR"
+    fuser -k 5000/tcp 2>/dev/null || true
 
     if [ ! -f "$VENV/bin/python3" ]; then
         echo "Creating virtual environment..."

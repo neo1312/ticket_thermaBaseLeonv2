@@ -173,8 +173,8 @@ def _find_scanner(known_name=None):
         try:
             dev = evdev.InputDevice(path)
         except PermissionError:
-            print("Permission denied reading {}".format(path))
-            print("Add user to 'input' group: sudo usermod -a -G input $USER")
+            print("Permission denied reading {}".format(path), flush=True)
+            print("Add user to 'input' group: sudo usermod -a -G input $USER", flush=True)
             continue
         except Exception as e:
             continue
@@ -207,7 +207,7 @@ def _find_scanner(known_name=None):
             if dev not in candidates:
                 dev.close()
     if candidates:
-        print("Scanner candidates: {}".format([(c.path, c.name) for c in candidates]))
+        print("Scanner candidates: {}".format([(c.path, c.name) for c in candidates]), flush=True)
         for c in candidates[1:]:
             c.close()
         return candidates[0]
@@ -239,15 +239,15 @@ class BarcodeScannerListener:
     def find_and_listen(self):
         device = _find_scanner()
         if device is None:
-            print("No barcode scanner device found")
+            print("No barcode scanner device found", flush=True)
             return
         self.device = device
-        print("Scanner device: {} ({})".format(device.path, device.name))
+        print("Scanner device: {} ({})".format(device.path, device.name), flush=True)
         try:
             while True:
                 barcode = _read_until_enter(device)
                 if barcode:
-                    print("Scanned: {}".format(barcode))
+                    print("Scanned: {}".format(barcode), flush=True)
                     try:
                         resp = requests.post(
                             self.endpoint,
@@ -255,11 +255,11 @@ class BarcodeScannerListener:
                             timeout=10,
                             verify=False,
                         )
-                        print("POST {} -> {}".format(self.endpoint, resp.status_code))
+                        print("POST {} -> {}".format(self.endpoint, resp.status_code), flush=True)
                     except Exception as e:
-                        print("POST failed: {}".format(e))
+                        print("POST failed: {}".format(e), flush=True)
         except evdev.InputClosedError:
-            print("Scanner device disconnected")
+            print("Scanner device disconnected", flush=True)
         finally:
             device.close()
 
